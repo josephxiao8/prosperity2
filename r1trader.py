@@ -4,13 +4,8 @@ from datamodel import OrderDepth, Trade, TradingState, Order
 from typing import Optional
 import numpy as np
 
-# 0 --> INFO
-# 1 --> WARN
-# 2 --> DEBUG
 
-
-class LOGGER:
-
+class Logger:
     INFO_LEVEL = 0
     WARN_LEVEL = 1
     DEBUG_LEVEL = 2
@@ -20,16 +15,19 @@ class LOGGER:
         self.level_ = level
 
     def info(self, message: str):
-        if self.level_ >= LOGGER.INFO_LEVEL:
+        if self.level_ >= Logger.INFO_LEVEL:
             print(f"[INFO][{self.name_}] {message}", flush=True)
 
     def warn(self, message: str):
-        if self.level_ >= LOGGER.WARN_LEVEL:
+        if self.level_ >= Logger.WARN_LEVEL:
             print(f"[WARN][{self.name_}] {message}", flush=True)
 
     def debug(self, message: str):
-        if self.level_ >= LOGGER.DEBUG_LEVEL:
+        if self.level_ >= Logger.DEBUG_LEVEL:
             print(f"[DEBUG][{self.name_}] {message}", flush=True)
+
+
+################    BEGIN HELPER METHODS     ################
 
 
 def how_much_to_order(
@@ -50,6 +48,9 @@ def calculate_average(a: list[int], weights: Optional[list[int]] = None) -> floa
     return float(np.average(a=a, weights=weights))
 
 
+################    END HELPER METHODS     ################
+
+
 class Trader:
     AMETHYSTS_NAME: str = "AMETHYSTS"
     STARFRUIT_NAME: str = "STARFRUIT"
@@ -64,17 +65,17 @@ class Trader:
     recent_starfruit_trades: list[tuple[int, int, int]]
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
+        logger = Logger("run_AMETHYSTS", Logger.INFO_LEVEL)
+        logger.info("Beginning amethysts trading")
+
         product = self.AMETHYSTS_NAME
         order_depth: OrderDepth = state.order_depths[product]
         # Initialize the list of Orders to be sent as an empty list
         orders: list[Order] = []
-        # Define a fair value for the PRODUCT. Might be different for each tradable item
-        # Note that this value of 10 is just a dummy value, you should likely change it!
+
         acceptable_price = 10000
-        # All print statements output will be delivered inside test results
-        print("Acceptable price : " + str(acceptable_price))
-        # print("Buy Order depth : " + str(len(order_depth.buy_orders)) +
-        #       ", Sell order depth : " + str(len(order_depth.sell_orders)))
+
+        logger.info(f"Acceptable price: {str(acceptable_price)}")
 
         best_sell = 0
         sell_quantity = 0
@@ -85,28 +86,35 @@ class Trader:
         # We can simply pick first item to check first item to get best bid or offer
         if len(order_depth.sell_orders) != 0:
             best_sell = min(order_depth.sell_orders.keys())
-            filtered_sell_orders = filter(
-                lambda x: x[0] < acceptable_price, order_depth.sell_orders.items()
-            )
-            filtered_quantities = map(lambda x: abs(x[1]), filtered_sell_orders)
-            sell_quantity = sum(filtered_quantities)
 
-            # print("BUY", str(total_quantity) + "x", best_sell)
-            # orders.append(Order(product, best_sell, total_quantity))
+            filtered_sell_orders = [
+                sell_order
+                for sell_order in order_depth.sell_orders.items()
+                if sell_order[0] < acceptable_price
+            ]
+
+            filtered_quantities = [
+                abs(quantity) for _, quantity in filtered_sell_orders
+            ]
+
+            sell_quantity = sum(filtered_quantities)
 
         if len(order_depth.buy_orders) != 0:
             best_buy = max(order_depth.buy_orders.keys())
-            filtered_buy_orders = filter(
-                lambda x: x[0] > acceptable_price, order_depth.buy_orders.items()
-            )
-            filtered_quantities = map(lambda x: abs(x[1]), filtered_buy_orders)
+
+            filtered_buy_orders = [
+                buy_order
+                for buy_order in order_depth.buy_orders.items()
+                if buy_order[0] > acceptable_price
+            ]
+
+            filtered_quantities = [abs(quantity) for _, quantity in filtered_buy_orders]
             buy_quantity = sum(filtered_quantities)
 
-            # print("BUY", str(total_quantity) + "x", best_buy)
-            # orders.append(Order(product, best_buy, -total_quantity))
-
         position_current = state.position.get(product, 0)
-        print(f"position_current = {position_current} for product = {product}")
+
+        logger.debug(f"Current position = {position_current} for product = {product}")
+
         position_max = self.POSITION_LIMIT[product]
         position_min = -position_max
 
@@ -152,11 +160,12 @@ class Trader:
             >= position_current + intersect_quantity + sell_quantity + position_max_diff
         )
 
-        print(orders)
+        logger.debug(f"Orders: {orders}")
+
         return orders
 
     def run_STARFRUIT(self, state: TradingState) -> list[Order]:
-        logger = LOGGER("run_STARFRUIT", LOGGER.DEBUG_LEVEL)
+        logger = Logger("run_STARFRUIT", Logger.DEBUG_LEVEL)
         logger.info("Starting starfruit trading")
 
         product = self.STARFRUIT_NAME
@@ -175,7 +184,8 @@ class Trader:
             acceptable_price=acceptable_price,
         )
 
-        logger.info(f"startfruit_orders: {orders}")
+        logger.info(f"Orders: {orders}")
+
         return orders
 
     def calc_next_trade_price_starfruit(self) -> int:
@@ -204,6 +214,9 @@ class Trader:
         position: int,
         acceptable_price: int,
     ) -> list[Order]:
+
+        logger = Logger("calc_buy_and_sel_orders", Logger.INFO_LEVEL)
+
         # keep all values denoting volume/quantity non-negative, until we place actually place orders
         agent_sell_orders_we_considering = [
             abs(vol)
@@ -227,7 +240,8 @@ class Trader:
             or agent_buy_orders_we_considering_quantity == 0
         )
 
-        print(f"position = {position} for product = {product}")
+        logger.debug(f"position = {position} for product = {product}")
+
         position_max = self.POSITION_LIMIT[product]
         position_min = -1 * self.POSITION_LIMIT[product]
 
@@ -338,7 +352,7 @@ class Trader:
         decoded_starfruit: Optional[tuple[list[float], list[tuple[int, int, int]]]],
         starfruit_market_trades: list[Trade],
     ):
-        logger = LOGGER("decode_starfruit", LOGGER.DEBUG_LEVEL)
+        logger = Logger("decode_starfruit", Logger.DEBUG_LEVEL)
         logger.info("Decoding STARFRUIT")
         logger.debug(f"decoded_starfruit: {decoded_starfruit}")
         logger.debug(f"starfruit_market_trades: {starfruit_market_trades}")
@@ -417,7 +431,7 @@ class Trader:
         """
         traderData: str = state.traderData
         market_trades: dict[str, list[Trade]] = state.market_trades
-        logger = LOGGER("run", LOGGER.DEBUG_LEVEL)
+        logger = Logger("run", Logger.DEBUG_LEVEL)
 
         ###### STEP 1: DECODE ######
         logger.info("Starting step 1: DECODE")
