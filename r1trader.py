@@ -57,12 +57,16 @@ class Trader:
 
     POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20}
 
-    # length 4, first element is timestamp - 4 iterations, ..., last element is timestamp - 1 iteration
-    # B_0 + B_1*predictors[0] + B_2 *predictors[1] + ... + B_4*predictors[3]
-    starfruit_predictors: list[float]
-    # elements in the form (price, quantity, timestamp)
+    P_STARFRUIT = 4  # number of market_price and mid_price predictors (2P in total)
+
+    starfruit_match_price_predictors: list[float]
+
+    # elements of the form (price, quantity, timestamp)
     # stores data that will be aggregated to a single value, and pushed info starfruit_predictors
-    recent_starfruit_trades: list[tuple[int, int, int]]
+    recent_starfruit_trades_queue: list[tuple[int, int, int]]
+
+    # unlike the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
+    starfruit_mid_price_predictors: list[float]
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
         logger = Logger("run_AMETHYSTS", Logger.INFO_LEVEL)
@@ -73,7 +77,7 @@ class Trader:
         # Initialize the list of Orders to be sent as an empty list
         orders: list[Order] = []
 
-        acceptable_price = 10000
+        acceptable_price = 10_000
 
         logger.info(f"Acceptable price: {str(acceptable_price)}")
 
@@ -171,11 +175,17 @@ class Trader:
         product = self.STARFRUIT_NAME
         order_depth: OrderDepth = state.order_depths[product]
 
-        if len(self.starfruit_predictors) < 4:
+        logger.debug(f"OrderDepth: {order_depth}")
+
+        # TODO investigate if we can estimate bid price without regression
+        if (
+            len(self.starfruit_match_price_predictors) < self.P_STARFRUIT
+            or len(self.starfruit_mid_price_predictors) < self.P_STARFRUIT
+        ):
             return []
 
-        acceptable_price = self.calc_next_trade_price_starfruit()
-        logger.info("Acceptable price : " + str(acceptable_price))
+        acceptable_price = self.estimate_fair_price_starfruit()
+        logger.info("Acceptable price: " + str(acceptable_price))
 
         orders: list[Order] = self.calc_buy_and_sell_orders(
             product=product,
@@ -188,24 +198,34 @@ class Trader:
 
         return orders
 
-    def calc_next_trade_price_starfruit(self) -> int:
-        assert len(self.starfruit_predictors) <= 4
-
-        if len(self.starfruit_predictors) == 0:
-            # TODO investigate further, 5_000 too low? Maybe set to mid-price
-            return 5_000
-        elif len(self.starfruit_predictors) < 4:
-            return int(np.mean(self.starfruit_predictors))
+    def estimate_fair_price_starfruit(self) -> int:
+        assert len(self.starfruit_match_price_predictors) == self.P_STARFRUIT
+        assert len(self.starfruit_mid_price_predictors) == self.P_STARFRUIT
 
         # TODO verify coefficients
-        # linear regression
-        # replace this with coefs B_0, B_1, B_2, B_3, B_4
-        betas = np.array(
-            [58.2441390858412, 0.18658477, 0.2441745, 0.26626671, 0.2914389]
+        # Linear regression
+
+        beta = np.array(
+            [
+                26.44753348300128,
+                0.03073808,
+                0.02727196,
+                0.02748499,
+                -0.02022061,
+                0.15585123,
+                0.19657682,
+                0.2511217,
+                0.32589726,
+            ]
         )
-        # add 1.0 for bias term
-        x = np.array([1.0] + self.starfruit_predictors)
-        return max(0, int(np.dot(betas, x)))
+
+        x = np.array(
+            [1.0]  # add 1.0 for intercept term
+            + self.starfruit_match_price_predictors
+            + self.starfruit_mid_price_predictors
+        )
+
+        return max(0, int(np.dot(beta, x)))
 
     def calc_buy_and_sell_orders(
         self,
@@ -215,7 +235,7 @@ class Trader:
         acceptable_price: int,
     ) -> list[Order]:
 
-        logger = Logger("calc_buy_and_sel_orders", Logger.INFO_LEVEL)
+        logger = Logger("calc_buy_and_sell_orders", Logger.INFO_LEVEL)
 
         # keep all values denoting volume/quantity non-negative, until we place actually place orders
         agent_sell_orders_we_considering = [
@@ -299,7 +319,7 @@ class Trader:
                 # buy order
                 Order(
                     product,
-                    acceptable_price + 2,
+                    acceptable_price - 1,
                     quantity,
                 )
             )
@@ -317,7 +337,7 @@ class Trader:
                 # sell order
                 Order(
                     product,
-                    acceptable_price - 2,
+                    acceptable_price + 1,
                     -quantity,
                 )
             )
@@ -332,7 +352,7 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # buy order
-                Order(product, acceptable_price - 3, quantity)
+                Order(product, acceptable_price - 2, quantity)
             )
 
         quantity = how_much_to_order(
@@ -342,7 +362,7 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # sell order
-                Order(product, acceptable_price + 3, -quantity)
+                Order(product, acceptable_price + 2, -quantity)
             )
 
         return orders
@@ -351,6 +371,7 @@ class Trader:
         self,
         decoded_starfruit: Optional[tuple[list[float], list[tuple[int, int, int]]]],
         starfruit_market_trades: list[Trade],
+        starfruit_order_depths: OrderDepth,
     ):
         logger = Logger("decode_starfruit", Logger.DEBUG_LEVEL)
         logger.info("Decoding STARFRUIT")
@@ -359,23 +380,33 @@ class Trader:
 
         if decoded_starfruit == None:
             # first iteration
-            self.starfruit_predictors = []
-            self.recent_starfruit_trades = []
+            self.starfruit_match_price_predictors = []
+            self.recent_starfruit_trades_queue = []
+            self.starfruit_mid_price_predictors = []
         else:
-            self.starfruit_predictors = decoded_starfruit[0]
-            self.recent_starfruit_trades = decoded_starfruit[1]
+            self.starfruit_match_price_predictors = decoded_starfruit[0]
+            self.recent_starfruit_trades_queue = decoded_starfruit[1]
+            self.starfruit_mid_price_predictors = decoded_starfruit[2]
 
-        logger.debug(f"starfruit_predictors: {self.starfruit_predictors}")
-        logger.debug(f"recent_starfruit_trades: {self.recent_starfruit_trades}")
+        logger.debug(
+            f"starfruit_market_price_predictors: {self.starfruit_match_price_predictors}"
+        )
+        logger.debug(
+            f"recent_starfruit_trades_queue: {self.recent_starfruit_trades_queue}"
+        )
+        logger.debug(
+            f"starfruit_mid_price_predictors: {self.starfruit_mid_price_predictors}"
+        )
 
         # check assumptions
-        assert len(self.starfruit_predictors) <= 4
+        assert len(self.starfruit_match_price_predictors) <= self.P_STARFRUIT
+        assert len(self.starfruit_mid_price_predictors) <= self.P_STARFRUIT
 
         # Get the time stamp corresponding to the trades in self.recent_starfruit_trades at this moment
         last_timestamp_trade_occured = (
             -1
-            if len(self.recent_starfruit_trades) == 0
-            else self.recent_starfruit_trades[0][2]
+            if len(self.recent_starfruit_trades_queue) == 0
+            else self.recent_starfruit_trades_queue[0][2]
         )
 
         """
@@ -390,6 +421,8 @@ class Trader:
         }
         """
 
+        # SUBSTEP 1: Update market price predictors
+
         for current_timestamp in sorted(
             set([trade.timestamp for trade in starfruit_market_trades])
         ):
@@ -402,22 +435,42 @@ class Trader:
             ]
 
             # Re-assign recent starfruit trades
-            self.recent_starfruit_trades = [
+            self.recent_starfruit_trades_queue = [
                 (trade.price, trade.quantity, trade.timestamp)
                 for trade in trades_from_timestamp
             ]
 
-            prices_at_timestamp = [trade[0] for trade in self.recent_starfruit_trades]
+            prices_at_timestamp = [
+                trade[0] for trade in self.recent_starfruit_trades_queue
+            ]
 
             if last_timestamp_trade_occured == current_timestamp:
-                self.starfruit_predictors.pop()
+                self.starfruit_match_price_predictors.pop()
 
-            self.starfruit_predictors.append(calculate_average(prices_at_timestamp))
+            self.starfruit_match_price_predictors.append(
+                calculate_average(prices_at_timestamp)
+            )
 
             last_timestamp_trade_occured = current_timestamp
 
-            if len(self.starfruit_predictors) > 4:
-                self.starfruit_predictors = self.starfruit_predictors[1:]
+            if len(self.starfruit_match_price_predictors) > self.P_STARFRUIT:
+                self.starfruit_match_price_predictors.pop(0)
+
+        # SUBSTEP 2: Update mid price predictors
+
+        if (
+            len(starfruit_order_depths.buy_orders) != 0
+            and len(starfruit_order_depths.sell_orders) != 0
+        ):
+            best_buy_price = max(starfruit_order_depths.buy_orders.keys())
+            best_sell_price = min(starfruit_order_depths.sell_orders.keys())
+
+            self.starfruit_mid_price_predictors.append(
+                (best_buy_price + best_sell_price) / 2
+            )
+
+        if len(self.starfruit_mid_price_predictors) > self.P_STARFRUIT:
+            self.starfruit_mid_price_predictors.pop(0)
 
     def run(self, state: TradingState):
 
@@ -425,7 +478,7 @@ class Trader:
         """
         format: A dict whose keys are product names.
         {
-            "STARFRUIT": (self.starfruit_cache, self.starfruit_trades)
+            "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
         }
 
         """
@@ -445,6 +498,9 @@ class Trader:
         self.decode_starfruit(
             decoded_starfruit=decoded_starfruit,
             starfruit_market_trades=market_trades.get(self.STARFRUIT_NAME, []),
+            starfruit_order_depths=state.order_depths.get(
+                self.STARFRUIT_NAME, OrderDepth()
+            ),
         )
 
         ###### STEP 2: PLACE ORDERS #####
@@ -467,8 +523,9 @@ class Trader:
         traderData = JSONEncoder().encode(
             {
                 self.STARFRUIT_NAME: (
-                    self.starfruit_predictors,
-                    self.recent_starfruit_trades,
+                    self.starfruit_match_price_predictors,
+                    self.recent_starfruit_trades_queue,
+                    self.starfruit_mid_price_predictors,
                 )
             }
         )
