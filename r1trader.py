@@ -199,8 +199,8 @@ class Trader:
         return orders
 
     def estimate_fair_price_starfruit(self) -> int:
-        assert len(self.starfruit_match_price_predictors) <= self.P_STARFRUIT
-        assert len(self.starfruit_mid_price_predictors) <= self.P_STARFRUIT
+        assert len(self.starfruit_match_price_predictors) == self.P_STARFRUIT
+        assert len(self.starfruit_mid_price_predictors) == self.P_STARFRUIT
 
         # TODO verify coefficients
         # Linear regression
