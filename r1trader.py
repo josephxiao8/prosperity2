@@ -65,7 +65,7 @@ class Trader:
     # stores data that will be aggregated to a single value, and pushed info starfruit_predictors
     recent_starfruit_trades_queue: list[tuple[int, int, int]]
 
-    # unline the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
+    # unlike the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
     starfruit_mid_price_predictors: list[float]
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
@@ -387,6 +387,7 @@ class Trader:
         else:
             self.starfruit_market_price_predictors = decoded_starfruit[0]
             self.recent_starfruit_trades_queue = decoded_starfruit[1]
+            self.starfruit_mid_price_predictors = decoded_starfruit[2]
 
         logger.debug(
             f"starfruit_market_price_predictors: {self.starfruit_market_price_predictors}"
@@ -454,9 +455,7 @@ class Trader:
             last_timestamp_trade_occured = current_timestamp
 
             if len(self.starfruit_market_price_predictors) > self.P_STARFRUIT:
-                self.starfruit_market_price_predictors = (
-                    self.starfruit_market_price_predictors[1:]
-                )
+                self.starfruit_market_price_predictors.pop(0)
 
         # SUBSTEP 2: Update mid price predictors
 
