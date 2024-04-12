@@ -1,6 +1,6 @@
 from json import JSONDecoder, JSONEncoder
 
-from datamodel import OrderDepth, Trade, TradingState, Order
+from datamodel import ConversionObservation, OrderDepth, Trade, TradingState, Order
 from typing import Optional
 import numpy as np
 
@@ -54,9 +54,11 @@ def calculate_average(a: list[int], weights: Optional[list[int]] = None) -> floa
 class Trader:
     AMETHYSTS_NAME: str = "AMETHYSTS"
     STARFRUIT_NAME: str = "STARFRUIT"
+    ORCHIDS_NAME: str = "ORCHIDS"
 
-    POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20}
+    POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20, "ORCHIDS": 100}
 
+    ### STARFRUIT
     P_STARFRUIT = 4  # number of market_price and mid_price predictors (2P in total)
 
     starfruit_match_price_predictors: list[float]
@@ -67,6 +69,15 @@ class Trader:
 
     # unlike the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
     starfruit_mid_price_predictors: list[float]
+
+    ### ORCHIDS
+    P_ORCHIDS = 4
+    mid_price_predictors: list[float]
+    transport_fees_predictors: list[float]
+    export_tariff_predictors: list[float]
+    import_tariff_predictors: list[float]
+    sunlight_predictors: list[float]
+    humidity_predictors: list[float]
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
         logger = Logger("run_AMETHYSTS", Logger.INFO_LEVEL)
@@ -475,6 +486,82 @@ class Trader:
         if len(self.starfruit_mid_price_predictors) > self.P_STARFRUIT:
             self.starfruit_mid_price_predictors.pop(0)
 
+    def decode_orchids(
+        self,
+        decoded_orchids: Optional[
+            tuple[
+                list[float],
+                list[float],
+                list[float],
+                list[float],
+                list[float],
+                list[float],
+            ]
+        ],
+        conversionObservation: Optional[ConversionObservation],
+    ):
+        logger = Logger("decode_orchids", Logger.DEBUG_LEVEL)
+
+        if decoded_orchids == None:
+            # first iteration
+            self.mid_price_predictors = []
+            self.transport_fees_predictors = []
+            self.export_tariff_predictors = []
+            self.import_tariff_predictors = []
+            self.sunlight_predictors = []
+            self.humidity_predictors = []
+        else:
+            self.mid_price_predictors = decoded_orchids[0]
+            self.transport_fees_predictors = decoded_orchids[1]
+            self.export_tariff_predictors = decoded_orchids[2]
+            self.import_tariff_predictors = decoded_orchids[3]
+            self.sunlight_predictors = decoded_orchids[4]
+            self.humidity_predictors = decoded_orchids[5]
+
+        if conversionObservation == None:
+            logger.warn("Did not recieve a conservation observation for orchids")
+            return
+
+        logger.debug(f"mid_price_predictors: {self.mid_price_predictors}")
+        logger.debug(f"transport_fees_predictors: {self.transport_fees_predictors}")
+        logger.debug(f"export_tariff_predictors: {self.export_tariff_predictors}")
+        logger.debug(f"import_tariff_predictors: {self.import_tariff_predictors}")
+        logger.debug(f"sunlight_predictors: {self.sunlight_predictors}")
+        logger.debug(f"humidity_predictors: {self.humidity_predictors}")
+
+        # check assumptions
+        expected_common_len = len(self.mid_price_predictors)
+        assert expected_common_len <= self.P_ORCHIDS
+        assert len(self.mid_price_predictors) == expected_common_len
+        assert len(self.transport_fees_predictors) == expected_common_len
+        assert len(self.export_tariff_predictors) == expected_common_len
+        assert len(self.import_tariff_predictors) == expected_common_len
+        assert len(self.sunlight_predictors) == expected_common_len
+        assert len(self.humidity_predictors) == expected_common_len
+
+        askPrice = conversionObservation.askPrice
+        bidPrice = conversionObservation.bidPrice
+        transportFees = conversionObservation.transportFees
+        exportTariff = conversionObservation.exportTariff
+        importTariff = conversionObservation.importTariff
+        sunlight = conversionObservation.sunlight
+        humidity = conversionObservation.humidity
+
+        if expected_common_len >= self.P_ORCHIDS:
+            self.mid_price_predictors.pop(0)
+            self.transport_fees_predictors.pop(0)
+            self.export_tariff_predictors.pop(0)
+            self.import_tariff_predictors.pop(0)
+            self.sunlight_predictors.pop(0)
+            self.humidity_predictors.pop(0)
+
+        self.mid_price_predictors.append((askPrice + bidPrice) / 2)
+        self.transport_fees_predictors.append(transportFees)
+        self.export_tariff_predictors.append(exportTariff)
+        self.import_tariff_predictors.append(importTariff)
+        self.sunlight_predictors.append(sunlight)
+        self.humidity_predictors.append(humidity)
+
     def run(self, state: TradingState):
 
         # ENCODE FORMAT:
@@ -482,11 +569,13 @@ class Trader:
         format: A dict whose keys are product names.
         {
             "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
+            "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors)
         }
 
         """
         traderData: str = state.traderData
         market_trades: dict[str, list[Trade]] = state.market_trades
+        conversionObservations = state.observations.conversionObservations
         logger = Logger("run", Logger.DEBUG_LEVEL)
 
         ###### STEP 1: DECODE ######
@@ -506,6 +595,12 @@ class Trader:
             ),
         )
 
+        decoded_orchids = decoded.get(self.ORCHIDS_NAME, None)
+        self.decode_orchids(
+            decoded_orchids=decoded_orchids,
+            conversionObservation=conversionObservations.get(self.ORCHIDS_NAME, None),
+        )
+
         ###### STEP 2: PLACE ORDERS #####
         logger.info("Starting step 2: PLACE ORDERS")
 
@@ -518,6 +613,8 @@ class Trader:
                 orders = self.run_AMETHYSTS(state)
             elif product == self.STARFRUIT_NAME:
                 orders = self.run_STARFRUIT(state)
+            elif product == self.ORCHIDS_NAME:
+                pass
 
             result[product] = orders
 
@@ -529,7 +626,15 @@ class Trader:
                     self.starfruit_match_price_predictors,
                     self.recent_starfruit_trades_queue,
                     self.starfruit_mid_price_predictors,
-                )
+                ),
+                self.ORCHIDS_NAME: (
+                    self.mid_price_predictors,
+                    self.transport_fees_predictors,
+                    self.export_tariff_predictors,
+                    self.import_tariff_predictors,
+                    self.sunlight_predictors,
+                    self.humidity_predictors,
+                ),
             }
         )
 
