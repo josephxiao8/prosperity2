@@ -370,7 +370,9 @@ class Trader:
 
     def decode_starfruit(
         self,
-        decoded_starfruit: Optional[tuple[list[float], list[tuple[int, int, int]]]],
+        decoded_starfruit: Optional[
+            tuple[list[float], list[tuple[int, int, int]], list[float]]
+        ],
         starfruit_market_trades: list[Trade],
         starfruit_order_depths: OrderDepth,
     ):
