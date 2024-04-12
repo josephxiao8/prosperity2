@@ -175,7 +175,8 @@ class Trader:
         product = self.STARFRUIT_NAME
         order_depth: OrderDepth = state.order_depths[product]
 
-        logger.debug(f"OrderDepth: {order_depth}")
+        logger.debug(f"OrderDepth Buy: {order_depth.buy_orders}")
+        logger.debug(f"OrderDepth Sell: {order_depth.sell_orders}")
 
         # TODO investigate if we can estimate bid price without regression
         if (
