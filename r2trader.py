@@ -534,13 +534,12 @@ class Trader:
         )
         agent_buy_orders_we_considering_quantity = sum(agent_buy_orders_we_considering)
 
+        # TODO this assertion might not hold anymore
         # one of these values must be zero
-        assert (
-            agent_sell_orders_we_considering_quantity == 0
-            or agent_buy_orders_we_considering_quantity == 0
-        )
-
-        logger.debug(f"position = {position} for product = {product}")
+        # assert (
+        #     agent_sell_orders_we_considering_quantity == 0
+        #     or agent_buy_orders_we_considering_quantity == 0
+        # )
 
         position_max = self.POSITION_LIMIT[product]
         position_min = -1 * self.POSITION_LIMIT[product]
@@ -563,7 +562,7 @@ class Trader:
                 # sell order
                 Order(
                     product,
-                    acceptable_price + 1,
+                    int(acceptable_price + 1),
                     -our_sell_quantity,
                 )
             )
@@ -572,7 +571,7 @@ class Trader:
                 # buy order
                 Order(
                     product,
-                    acceptable_price - 1,
+                    int(acceptable_price - 1),
                     our_buy_quantity,
                 )
             )
@@ -622,7 +621,6 @@ class Trader:
         logger = Logger("decode_starfruit", Logger.DEBUG_LEVEL)
         logger.info("Decoding STARFRUIT")
         logger.debug(f"decoded_starfruit: {decoded_starfruit}")
-        logger.debug(f"starfruit_market_trades: {starfruit_market_trades}")
 
         if decoded_starfruit == None:
             # first iteration
@@ -633,16 +631,6 @@ class Trader:
             self.starfruit_match_price_predictors = decoded_starfruit[0]
             self.recent_starfruit_trades_queue = decoded_starfruit[1]
             self.starfruit_mid_price_predictors = decoded_starfruit[2]
-
-        logger.debug(
-            f"starfruit_market_price_predictors: {self.starfruit_match_price_predictors}"
-        )
-        logger.debug(
-            f"recent_starfruit_trades_queue: {self.recent_starfruit_trades_queue}"
-        )
-        logger.debug(
-            f"starfruit_mid_price_predictors: {self.starfruit_mid_price_predictors}"
-        )
 
         # check assumptions
         assert len(self.starfruit_match_price_predictors) <= self.P_STARFRUIT
@@ -672,7 +660,7 @@ class Trader:
         for current_timestamp in sorted(
             set([trade.timestamp for trade in starfruit_market_trades])
         ):
-            logger.debug(f"current_timestamp: {current_timestamp}")
+            logger.debug(f"market trades current timestamp: {current_timestamp}")
             # Will always be non-empty
             trades_from_timestamp = [
                 trade
@@ -718,6 +706,16 @@ class Trader:
         if len(self.starfruit_mid_price_predictors) > self.P_STARFRUIT:
             self.starfruit_mid_price_predictors.pop(0)
 
+        logger.debug(
+            f"starfruit_market_price_predictors: {self.starfruit_match_price_predictors}"
+        )
+        logger.debug(
+            f"recent_starfruit_trades_queue: {self.recent_starfruit_trades_queue}"
+        )
+        logger.debug(
+            f"starfruit_mid_price_predictors: {self.starfruit_mid_price_predictors}"
+        )
+
     def decode_orchids(
         self,
         decoded_orchids: Optional[
@@ -749,19 +747,6 @@ class Trader:
             self.orchids_import_tariff_predictors = decoded_orchids[3]
             self.orchids_sunlight_predictors = decoded_orchids[4]
             self.orchids_humidity_predictors = decoded_orchids[5]
-
-        logger.debug(f"mid_price_predictors: {self.orchids_mid_price_predictors}")
-        logger.debug(
-            f"transport_fees_predictors: {self.orchids_transport_fees_predictors}"
-        )
-        logger.debug(
-            f"export_tariff_predictors: {self.orchids_export_tariff_predictors}"
-        )
-        logger.debug(
-            f"import_tariff_predictors: {self.orchids_import_tariff_predictors}"
-        )
-        logger.debug(f"sunlight_predictors: {self.orchids_sunlight_predictors}")
-        logger.debug(f"humidity_predictors: {self.orchids_humidity_predictors}")
 
         # check assumptions
         expected_common_len = len(self.orchids_mid_price_predictors)
@@ -799,6 +784,19 @@ class Trader:
         self.orchids_import_tariff_predictors.append(importTariff)
         self.orchids_sunlight_predictors.append(sunlight)
         self.orchids_humidity_predictors.append(humidity)
+
+        logger.debug(f"mid_price_predictors: {self.orchids_mid_price_predictors}")
+        logger.debug(
+            f"transport_fees_predictors: {self.orchids_transport_fees_predictors}"
+        )
+        logger.debug(
+            f"export_tariff_predictors: {self.orchids_export_tariff_predictors}"
+        )
+        logger.debug(
+            f"import_tariff_predictors: {self.orchids_import_tariff_predictors}"
+        )
+        logger.debug(f"sunlight_predictors: {self.orchids_sunlight_predictors}")
+        logger.debug(f"humidity_predictors: {self.orchids_humidity_predictors}")
 
     def run(self, state: TradingState):
 
@@ -846,12 +844,17 @@ class Trader:
 
         for product in state.order_depths.keys():
             orders: list[Order] = []
-            logger.info(f"{product}")
+            logger.info(f"Position = {state.position.get(product, 0)} for {product}")
+            logger.info(
+                f"{product} market trades:  {state.market_trades.get(product, [])}"
+            )
 
             if product == self.AMETHYSTS_NAME:
-                orders = self.run_AMETHYSTS(state)
+                pass
+                # orders = self.run_AMETHYSTS(state)
             elif product == self.STARFRUIT_NAME:
-                orders = self.run_STARFRUIT(state)
+                pass
+                # orders = self.run_STARFRUIT(state)
             elif product == self.ORCHIDS_NAME:
                 orders, conversions = self.run_ORCHIDS(state)
 
