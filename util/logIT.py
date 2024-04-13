@@ -32,16 +32,11 @@ with open(path_to_log, "r") as input:
             continue
 
         index = stripped.find(":")
+
         log = stripped[index + 1 :].lstrip()
+        log = log.removeprefix('"').removesuffix(",").removesuffix('"')
+        log = log.replace("\\n", "\n").replace("\\t", "\t")
 
-        # get rid of leading and trailing \"
-        if log[-1] == ",":
-            log = log[:-1]
-        log = log[1:]
-        log = log[:-1]
-
-        log = log.replace("\\n", "\n")
-        log = log.replace("\\t", "\t")
         output_log.write(log + "\n\n")
 
     output_log.close()
