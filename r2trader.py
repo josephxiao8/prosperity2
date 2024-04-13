@@ -457,49 +457,62 @@ class Trader:
                 f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
             )
 
-        adjusted_acceptable_agent_bid_price = (
-            conversionObservation.bidPrice
-            - conversionObservation.exportTariff
-            - conversionObservation.transportFees
-            - UNIT_ORCHID_STORAGE_COST
-        )
-
-        adjusted_acceptable_agent_ask_price = (
-            conversionObservation.askPrice
-            + conversionObservation.importTariff
+        acceptable_conversion_bid_price = (
+            acceptable_price
+            + conversionObservation.exportTariff
             + conversionObservation.transportFees
         )
 
+        acceptable_conversion_ask_price = (
+            acceptable_price
+            + conversionObservation.importTariff
+            + conversionObservation.transportFees
+            + UNIT_ORCHID_STORAGE_COST
+        )
+
         logger.info(
-            f"Adjusted fair agent bid price: {adjusted_acceptable_agent_bid_price}"
+            f"Acceptable conversion agent bid price: {acceptable_conversion_bid_price}"
         )
         logger.info(
-            f"Adjusted fair agent bid price: {adjusted_acceptable_agent_ask_price}"
+            f"Acceptable conversion agent ask price: {acceptable_conversion_ask_price}"
         )
+
+        # TODO implement a fast conversion
+        if (
+            conversionObservation.importTariff + UNIT_ORCHID_STORAGE_COST
+            < conversionObservation.exportTariff
+        ):
+            logger.warn(
+                "Opportunity to convert seashells to orchids and convert orchids to seashells in next timestamp"
+            )
+        else:
+            logger.warn(
+                "Opportunity to convert orchids to seashells and convert to orchids next timestamp"
+            )
 
         # Conversions
         logger.info("Generating ORCHIDS conversions if possible")
         if conversionObservation != None and position != 0:
-            logger.info(
-                f"Position is non-zero. Analyzing conversion observation with acceptable price {acceptable_price}."
-            )
-            if position > 0 and adjusted_acceptable_agent_bid_price >= acceptable_price:
+            logger.info(f"Position is non-zero. Analyzing conversion observation.")
+            if (
+                position > 0
+                and acceptable_conversion_bid_price <= conversionObservation.bidPrice
+            ):
                 # We will sell to the agent
                 logger.info(
-                    f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.askPrice}"
+                    f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
                 )
                 conversions = -1 * abs(position)
-                position = 0
 
             elif (
-                position < 0 and adjusted_acceptable_agent_ask_price < acceptable_price
+                position < 0
+                and acceptable_conversion_ask_price > conversionObservation.askPrice
             ):
                 # We will buy from the agent
                 logger.info(
                     f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
                 )
                 conversions = abs(position)
-                position = 0
 
         logger.info("Generating ORCHIDS orders")
 
@@ -508,12 +521,12 @@ class Trader:
         agent_sell_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.sell_orders.items()
-            if price < adjusted_acceptable_agent_ask_price
+            if price < acceptable_price + UNIT_ORCHID_STORAGE_COST
         ]
         agent_buy_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.buy_orders.items()
-            if price >= adjusted_acceptable_agent_bid_price
+            if price >= acceptable_price
         ]
 
         agent_sell_orders_we_considering_quantity = sum(
@@ -737,10 +750,6 @@ class Trader:
             self.orchids_sunlight_predictors = decoded_orchids[4]
             self.orchids_humidity_predictors = decoded_orchids[5]
 
-        if conversionObservation == None:
-            logger.warn("Did not recieve a conservation observation for orchids")
-            return
-
         logger.debug(f"mid_price_predictors: {self.orchids_mid_price_predictors}")
         logger.debug(
             f"transport_fees_predictors: {self.orchids_transport_fees_predictors}"
@@ -763,6 +772,10 @@ class Trader:
         assert len(self.orchids_import_tariff_predictors) == expected_common_len
         assert len(self.orchids_sunlight_predictors) == expected_common_len
         assert len(self.orchids_humidity_predictors) == expected_common_len
+
+        if conversionObservation == None:
+            logger.warn("Did not recieve a conservation observation for orchids")
+            return
 
         askPrice = conversionObservation.askPrice
         bidPrice = conversionObservation.bidPrice
@@ -796,7 +809,6 @@ class Trader:
             "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
             "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors)
         }
-
         """
         traderData: str = state.traderData
         market_trades: dict[str, list[Trade]] = state.market_trades
@@ -866,5 +878,4 @@ class Trader:
             }
         )
 
-        # conversions is in round 2
         return result, conversions, traderData
