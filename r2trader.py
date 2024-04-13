@@ -212,7 +212,7 @@ class Trader:
         logger.info("Beginning ORCHIDS trading")
 
         order_depth: OrderDepth = state.order_depths[self.ORCHIDS_NAME]
-        conversionObservation: ConversionObservation = (
+        conversionObservation: Optional[ConversionObservation] = (
             state.observations.conversionObservations.get(self.ORCHIDS_NAME, None)
         )
 
@@ -447,15 +447,11 @@ class Trader:
         product = self.ORCHIDS_NAME
         orders: list[Order] = []
         conversions: int = 0
-
         UNIT_ORCHID_STORAGE_COST = 0.1
 
-        if abs(conversionObservation.importTariff) > abs(
-            conversionObservation.exportTariff
-        ):
-            logger.warn(
-                f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
-            )
+        if conversionObservation == None:
+            logger.warn("conversionObservation is none")
+            return [], 0
 
         acceptable_conversion_bid_price = (
             conversionObservation.bidPrice
@@ -477,36 +473,55 @@ class Trader:
             f"Acceptable conversion agent ask price: {acceptable_conversion_ask_price}"
         )
 
-        # TODO implement a fast conversion
-        if (
-            conversionObservation.importTariff + UNIT_ORCHID_STORAGE_COST
-            < conversionObservation.exportTariff
-        ):
-            logger.warn(
-                "Opportunity to convert seashells to orchids and convert orchids to seashells in next timestamp"
-            )
-        else:
-            logger.warn(
-                "Opportunity to convert orchids to seashells and convert to orchids next timestamp"
-            )
-
         # Conversions
-        logger.info("Generating ORCHIDS conversions if possible")
-        if conversionObservation != None and position != 0:
-            logger.info(f"Position is non-zero. Analyzing conversion observation.")
-            if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
-                # We will sell to the agent
-                logger.info(
-                    f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
-                )
-                conversions = -1 * abs(position)
+        logger.info("Generating ORCHIDS conversions (if possible)")
 
-            elif position < 0 and acceptable_conversion_ask_price < acceptable_price:
-                # We will buy from the agent
-                logger.info(
-                    f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+        if conversionObservation != None:
+
+            # BEGIN Logging
+            if abs(conversionObservation.importTariff) > abs(
+                conversionObservation.exportTariff
+            ):
+                logger.warn(
+                    f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
                 )
-                conversions = abs(position)
+
+            # TODO Investigate if can implement a fast conversion
+            if (
+                conversionObservation.importTariff + UNIT_ORCHID_STORAGE_COST
+                < conversionObservation.exportTariff
+            ):
+                logger.warn(
+                    "Opportunity to convert seashells to orchids and convert orchids to seashells in next timestamp"
+                )
+            else:
+                logger.warn(
+                    "Opportunity to convert orchids to seashells and convert to orchids next timestamp"
+                )
+
+            # END Logging
+
+            # BEGIN conversion logic
+
+            if position != 0:
+                logger.info(f"Position is non-zero. Analyzing conversion observation.")
+                if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
+                    # We will sell to the agent
+                    logger.info(
+                        f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
+                    )
+                    conversions = -1 * abs(position)
+
+                elif (
+                    position < 0 and acceptable_conversion_ask_price < acceptable_price
+                ):
+                    # We will buy from the agent
+                    logger.info(
+                        f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                    )
+                    conversions = abs(position)
+
+            # END conversion logic
 
         logger.info("Generating ORCHIDS orders")
 
@@ -556,7 +571,7 @@ class Trader:
                 # sell order
                 Order(
                     product,
-                    int(acceptable_price + 1),
+                    int(acceptable_conversion_ask_price + 1),
                     -our_sell_quantity,
                 )
             )
@@ -565,7 +580,7 @@ class Trader:
                 # buy order
                 Order(
                     product,
-                    int(acceptable_price - 1),
+                    int(acceptable_conversion_bid_price - 1),
                     our_buy_quantity,
                 )
             )

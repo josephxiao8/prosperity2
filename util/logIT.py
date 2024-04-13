@@ -32,16 +32,11 @@ with open(path_to_log, "r") as input:
             continue
 
         index = stripped.find(":")
+
         log = stripped[index + 1 :].lstrip()
+        log = log.removeprefix('"').removesuffix(",").removesuffix('"')
+        log = log.replace("\\n", "\n").replace("\\t", "\t")
 
-        # get rid of leading and trailing \"
-        if log[-1] == ",":
-            log = log[:-1]
-        log = log[1:]
-        log = log[:-1]
-
-        log = log.replace("\\n", "\n")
-        log = log.replace("\\t", "\t")
         output_log.write(log + "\n\n")
 
     output_log.close()
@@ -55,7 +50,7 @@ with open(f"target/{os.path.basename(path_to_log)}", "r") as input:
 
     timestamp = 0
 
-    output_position_csv.write("uuid,timestamp,position,product")
+    output_position_csv.write("uuid,timestamp,product,position\n")
     # Loop through each line in the file
     for line in input:
         if POSITION_LOGS_UUID in line:
