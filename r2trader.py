@@ -58,30 +58,29 @@ class Trader:
 
     POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20, "ORCHIDS": 100}
 
-    ### STARFRUIT
+    ### BEGIN STARFRUIT STATE VAR ###
     P_STARFRUIT = 4  # number of market_price and mid_price predictors (2P in total)
-
     starfruit_match_price_predictors: list[float]
-
     # elements of the form (price, quantity, timestamp)
     # stores data that will be aggregated to a single value, and pushed info starfruit_predictors
     recent_starfruit_trades_queue: list[tuple[int, int, int]]
-
-    # unlike the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
+    # Unlike the market trades, mid_prices will only appear once per timestamp, so no need to keep a queue of recent
     starfruit_mid_price_predictors: list[float]
+    ### END STARFRUIT STATE VAR ###
 
-    ### ORCHIDS
+    ### BEGIN ORCHIDS STATE VAR ###
     P_ORCHIDS = 4
-    mid_price_predictors: list[float]
-    transport_fees_predictors: list[float]
-    export_tariff_predictors: list[float]
-    import_tariff_predictors: list[float]
-    sunlight_predictors: list[float]
-    humidity_predictors: list[float]
+    orchids_mid_price_predictors: list[float]
+    orchids_transport_fees_predictors: list[float]
+    orchids_export_tariff_predictors: list[float]
+    orchids_import_tariff_predictors: list[float]
+    orchids_sunlight_predictors: list[float]
+    orchids_humidity_predictors: list[float]
+    ### END ORCHIDS STATE VAR ###
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
         logger = Logger("run_AMETHYSTS", Logger.INFO_LEVEL)
-        logger.info("Beginning amethysts trading")
+        logger.info("Beginning AMETHYSTS trading")
 
         product = self.AMETHYSTS_NAME
         order_depth: OrderDepth = state.order_depths[product]
@@ -181,10 +180,9 @@ class Trader:
 
     def run_STARFRUIT(self, state: TradingState) -> list[Order]:
         logger = Logger("run_STARFRUIT", Logger.DEBUG_LEVEL)
-        logger.info("Starting starfruit trading")
+        logger.info("Beginning STARFRUIT trading")
 
-        product = self.STARFRUIT_NAME
-        order_depth: OrderDepth = state.order_depths[product]
+        order_depth: OrderDepth = state.order_depths[self.STARFRUIT_NAME]
 
         logger.debug(f"OrderDepth Buy: {order_depth.buy_orders}")
         logger.debug(f"OrderDepth Sell: {order_depth.sell_orders}")
@@ -199,16 +197,40 @@ class Trader:
         acceptable_price = self.estimate_fair_price_starfruit()
         logger.info("Acceptable price: " + str(acceptable_price))
 
-        orders: list[Order] = self.calc_buy_and_sell_orders(
-            product=product,
+        orders: list[Order] = self.get_orders_STARFRUIT(
             order_depth=order_depth,
-            position=state.position.get(product, 0),
+            position=state.position.get(self.STARFRUIT_NAME, 0),
             acceptable_price=acceptable_price,
         )
 
         logger.info(f"Orders: {orders}")
 
         return orders
+
+    def run_ORCHIDS(self, state: TradingState) -> tuple[list[Order], int]:
+        logger = Logger("run_ORCHIDS", Logger.DEBUG_LEVEL)
+        logger.info("Beginning ORCHIDS trading")
+
+        order_depth: OrderDepth = state.order_depths[self.ORCHIDS_NAME]
+        conversionObservation: ConversionObservation = (
+            state.observations.conversionObservations.get(self.ORCHIDS_NAME, None)
+        )
+
+        logger.debug(f"OrderDepth Buy: {order_depth.buy_orders}")
+        logger.debug(f"OrderDepth Sell: {order_depth.sell_orders}")
+
+        if len(self.orchids_mid_price_predictors) < self.P_ORCHIDS:
+            return [], 0
+
+        acceptable_price = self.estimate_fair_price_orchids()
+        logger.info("Estimated next orchids price: " + str(acceptable_price))
+
+        return self.get_ORCHIDS_orders_and_conversions(
+            order_depth=order_depth,
+            position=state.position.get(self.ORCHIDS_NAME, 0),
+            acceptable_price=acceptable_price,
+            conversionObservation=conversionObservation,
+        )
 
     def estimate_fair_price_starfruit(self) -> int:
         assert len(self.starfruit_match_price_predictors) == self.P_STARFRUIT
@@ -239,15 +261,49 @@ class Trader:
 
         return max(0, int(np.dot(beta, x)))
 
-    def calc_buy_and_sell_orders(
+    def estimate_fair_price_orchids(self) -> int:
+
+        assert len(self.orchids_mid_price_predictors) == self.P_ORCHIDS
+        assert len(self.orchids_transport_fees_predictors) == self.P_ORCHIDS
+        assert len(self.orchids_export_tariff_predictors) == self.P_ORCHIDS
+        assert len(self.orchids_import_tariff_predictors) == self.P_ORCHIDS
+        assert len(self.orchids_sunlight_predictors) == self.P_ORCHIDS
+        assert len(self.orchids_humidity_predictors) == self.P_ORCHIDS
+
+        beta = np.array(
+            [
+                0.06987954,
+                9.99711443e-01,
+                1.09677694e-02,
+                6.46992420e-03,
+                -2.80465300e-03,
+                1.75439458e-05,
+                1.37126605e-03,
+            ]
+        )
+
+        x = np.array(
+            [1.0]  # add 1.0 for intercept term
+            + self.orchids_mid_price_predictors[-1:]
+            + self.orchids_transport_fees_predictors[-1:]
+            + self.orchids_export_tariff_predictors[-1:]
+            + self.orchids_import_tariff_predictors[-1:]
+            + self.orchids_sunlight_predictors[-1:]
+            + self.orchids_humidity_predictors[-1:]
+        )
+
+        return max(0, int(np.dot(beta, x)))
+
+    def get_orders_STARFRUIT(
         self,
-        product: str,
         order_depth: OrderDepth,
         position: int,
         acceptable_price: int,
     ) -> list[Order]:
+        logger = Logger("get_orders_STARFRUIT", Logger.INFO_LEVEL)
+        logger.info("Generating STARFRUIT orders")
 
-        logger = Logger("calc_buy_and_sell_orders", Logger.INFO_LEVEL)
+        product = self.STARFRUIT_NAME
 
         # keep all values denoting volume/quantity non-negative, until we place actually place orders
         agent_sell_orders_we_considering = [
@@ -379,6 +435,169 @@ class Trader:
 
         return orders
 
+    def get_ORCHIDS_orders_and_conversions(
+        self,
+        order_depth: OrderDepth,
+        position: int,
+        acceptable_price: int,
+        conversionObservation: Optional[ConversionObservation],
+    ) -> tuple[list[Order], int]:
+        logger = Logger("get_ORCHIDS_orders_and_conversions", Logger.DEBUG_LEVEL)
+
+        product = self.ORCHIDS_NAME
+        orders: list[Order] = []
+        conversions: int = 0
+
+        UNIT_ORCHID_STORAGE_COST = 0.1
+
+        if abs(conversionObservation.importTariff) > abs(
+            conversionObservation.exportTariff
+        ):
+            logger.warn(
+                f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
+            )
+
+        adjusted_acceptable_agent_bid_price = (
+            conversionObservation.bidPrice
+            - conversionObservation.exportTariff
+            - conversionObservation.transportFees
+            - UNIT_ORCHID_STORAGE_COST
+        )
+
+        adjusted_acceptable_agent_ask_price = (
+            conversionObservation.askPrice
+            + conversionObservation.importTariff
+            + conversionObservation.transportFees
+        )
+
+        logger.info(
+            f"Adjusted fair agent bid price: {adjusted_acceptable_agent_bid_price}"
+        )
+        logger.info(
+            f"Adjusted fair agent bid price: {adjusted_acceptable_agent_ask_price}"
+        )
+
+        # Conversions
+        logger.info("Generating ORCHIDS conversions if possible")
+        if conversionObservation != None and position != 0:
+            logger.info(
+                f"Position is non-zero. Analyzing conversion observation with acceptable price {acceptable_price}."
+            )
+            if position > 0 and adjusted_acceptable_agent_bid_price >= acceptable_price:
+                # We will sell to the agent
+                logger.info(
+                    f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.askPrice}"
+                )
+                conversions = -1 * abs(position)
+                position = 0
+
+            elif (
+                position < 0 and adjusted_acceptable_agent_ask_price < acceptable_price
+            ):
+                # We will buy from the agent
+                logger.info(
+                    f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                )
+                conversions = abs(position)
+                position = 0
+
+        logger.info("Generating ORCHIDS orders")
+
+        # keep all values denoting volume/quantity non-negative, until we place actually place orders
+
+        agent_sell_orders_we_considering = [
+            abs(vol)
+            for price, vol in order_depth.sell_orders.items()
+            if price < adjusted_acceptable_agent_ask_price
+        ]
+        agent_buy_orders_we_considering = [
+            abs(vol)
+            for price, vol in order_depth.buy_orders.items()
+            if price >= adjusted_acceptable_agent_bid_price
+        ]
+
+        agent_sell_orders_we_considering_quantity = sum(
+            agent_sell_orders_we_considering
+        )
+        agent_buy_orders_we_considering_quantity = sum(agent_buy_orders_we_considering)
+
+        # one of these values must be zero
+        assert (
+            agent_sell_orders_we_considering_quantity == 0
+            or agent_buy_orders_we_considering_quantity == 0
+        )
+
+        logger.debug(f"position = {position} for product = {product}")
+
+        position_max = self.POSITION_LIMIT[product]
+        position_min = -1 * self.POSITION_LIMIT[product]
+
+        # don't buy more than your position limits
+        our_sell_quantity = min(
+            agent_buy_orders_we_considering_quantity, abs(position - position_min)
+        )
+        our_buy_quantity = min(
+            agent_sell_orders_we_considering_quantity, abs(position - position_max)
+        )
+
+        position_low = position - our_sell_quantity
+        position_high = position + our_buy_quantity
+        assert position_min <= position_low <= position_high <= position_max
+
+        orders: list[Order] = []
+        if our_sell_quantity != 0:
+            orders.append(
+                # sell order
+                Order(
+                    product,
+                    acceptable_price + 1,
+                    -our_sell_quantity,
+                )
+            )
+        if our_buy_quantity != 0:
+            orders.append(
+                # buy order
+                Order(
+                    product,
+                    acceptable_price - 1,
+                    our_buy_quantity,
+                )
+            )
+
+        # how much more we can still sell in current order
+        quantity_we_can_still_sell = abs(position_low - position_min)
+        # how much more we can still buy in current order
+        quantity_we_can_still_buy = abs(position_high - position_max)
+
+        # LEFTOVER_QUANTITY_THRESHOLD = 0
+
+        # # Handle the leftovers after adjusting for being too near position limit
+
+        # quantity = how_much_to_order(
+        #     quantity_we_can_still_buy, LEFTOVER_QUANTITY_THRESHOLD
+        # )
+
+        # if quantity > 0:
+        #     orders.append(
+        #         # buy order
+        #         Order(product, acceptable_price - 2, quantity)
+        #     )
+
+        # quantity = how_much_to_order(
+        #     quantity_we_can_still_sell, LEFTOVER_QUANTITY_THRESHOLD
+        # )
+
+        # if quantity > 0:
+        #     orders.append(
+        #         # sell order
+        #         Order(product, acceptable_price + 2, -quantity)
+        #     )
+
+        logger.info(f"Orders: {orders}")
+        logger.info(f"Conversion: {conversions}")
+
+        return orders, conversions
+
     def decode_starfruit(
         self,
         decoded_starfruit: Optional[
@@ -504,40 +723,46 @@ class Trader:
 
         if decoded_orchids == None:
             # first iteration
-            self.mid_price_predictors = []
-            self.transport_fees_predictors = []
-            self.export_tariff_predictors = []
-            self.import_tariff_predictors = []
-            self.sunlight_predictors = []
-            self.humidity_predictors = []
+            self.orchids_mid_price_predictors = []
+            self.orchids_transport_fees_predictors = []
+            self.orchids_export_tariff_predictors = []
+            self.orchids_import_tariff_predictors = []
+            self.orchids_sunlight_predictors = []
+            self.orchids_humidity_predictors = []
         else:
-            self.mid_price_predictors = decoded_orchids[0]
-            self.transport_fees_predictors = decoded_orchids[1]
-            self.export_tariff_predictors = decoded_orchids[2]
-            self.import_tariff_predictors = decoded_orchids[3]
-            self.sunlight_predictors = decoded_orchids[4]
-            self.humidity_predictors = decoded_orchids[5]
+            self.orchids_mid_price_predictors = decoded_orchids[0]
+            self.orchids_transport_fees_predictors = decoded_orchids[1]
+            self.orchids_export_tariff_predictors = decoded_orchids[2]
+            self.orchids_import_tariff_predictors = decoded_orchids[3]
+            self.orchids_sunlight_predictors = decoded_orchids[4]
+            self.orchids_humidity_predictors = decoded_orchids[5]
 
         if conversionObservation == None:
             logger.warn("Did not recieve a conservation observation for orchids")
             return
 
-        logger.debug(f"mid_price_predictors: {self.mid_price_predictors}")
-        logger.debug(f"transport_fees_predictors: {self.transport_fees_predictors}")
-        logger.debug(f"export_tariff_predictors: {self.export_tariff_predictors}")
-        logger.debug(f"import_tariff_predictors: {self.import_tariff_predictors}")
-        logger.debug(f"sunlight_predictors: {self.sunlight_predictors}")
-        logger.debug(f"humidity_predictors: {self.humidity_predictors}")
+        logger.debug(f"mid_price_predictors: {self.orchids_mid_price_predictors}")
+        logger.debug(
+            f"transport_fees_predictors: {self.orchids_transport_fees_predictors}"
+        )
+        logger.debug(
+            f"export_tariff_predictors: {self.orchids_export_tariff_predictors}"
+        )
+        logger.debug(
+            f"import_tariff_predictors: {self.orchids_import_tariff_predictors}"
+        )
+        logger.debug(f"sunlight_predictors: {self.orchids_sunlight_predictors}")
+        logger.debug(f"humidity_predictors: {self.orchids_humidity_predictors}")
 
         # check assumptions
-        expected_common_len = len(self.mid_price_predictors)
+        expected_common_len = len(self.orchids_mid_price_predictors)
         assert expected_common_len <= self.P_ORCHIDS
-        assert len(self.mid_price_predictors) == expected_common_len
-        assert len(self.transport_fees_predictors) == expected_common_len
-        assert len(self.export_tariff_predictors) == expected_common_len
-        assert len(self.import_tariff_predictors) == expected_common_len
-        assert len(self.sunlight_predictors) == expected_common_len
-        assert len(self.humidity_predictors) == expected_common_len
+        assert len(self.orchids_mid_price_predictors) == expected_common_len
+        assert len(self.orchids_transport_fees_predictors) == expected_common_len
+        assert len(self.orchids_export_tariff_predictors) == expected_common_len
+        assert len(self.orchids_import_tariff_predictors) == expected_common_len
+        assert len(self.orchids_sunlight_predictors) == expected_common_len
+        assert len(self.orchids_humidity_predictors) == expected_common_len
 
         askPrice = conversionObservation.askPrice
         bidPrice = conversionObservation.bidPrice
@@ -548,19 +773,19 @@ class Trader:
         humidity = conversionObservation.humidity
 
         if expected_common_len >= self.P_ORCHIDS:
-            self.mid_price_predictors.pop(0)
-            self.transport_fees_predictors.pop(0)
-            self.export_tariff_predictors.pop(0)
-            self.import_tariff_predictors.pop(0)
-            self.sunlight_predictors.pop(0)
-            self.humidity_predictors.pop(0)
+            self.orchids_mid_price_predictors.pop(0)
+            self.orchids_transport_fees_predictors.pop(0)
+            self.orchids_export_tariff_predictors.pop(0)
+            self.orchids_import_tariff_predictors.pop(0)
+            self.orchids_sunlight_predictors.pop(0)
+            self.orchids_humidity_predictors.pop(0)
 
-        self.mid_price_predictors.append((askPrice + bidPrice) / 2)
-        self.transport_fees_predictors.append(transportFees)
-        self.export_tariff_predictors.append(exportTariff)
-        self.import_tariff_predictors.append(importTariff)
-        self.sunlight_predictors.append(sunlight)
-        self.humidity_predictors.append(humidity)
+        self.orchids_mid_price_predictors.append((askPrice + bidPrice) / 2)
+        self.orchids_transport_fees_predictors.append(transportFees)
+        self.orchids_export_tariff_predictors.append(exportTariff)
+        self.orchids_import_tariff_predictors.append(importTariff)
+        self.orchids_sunlight_predictors.append(sunlight)
+        self.orchids_humidity_predictors.append(humidity)
 
     def run(self, state: TradingState):
 
@@ -579,7 +804,7 @@ class Trader:
         logger = Logger("run", Logger.DEBUG_LEVEL)
 
         ###### STEP 1: DECODE ######
-        logger.info("Starting step 1: DECODE")
+        logger.info("STEP 1: DECODE")
 
         decoded = {} if len(traderData) == 0 else JSONDecoder().decode(traderData)
 
@@ -602,9 +827,11 @@ class Trader:
         )
 
         ###### STEP 2: PLACE ORDERS #####
-        logger.info("Starting step 2: PLACE ORDERS")
+        logger.info("STEP 2: PLACE ORDERS")
 
         result = {}
+        conversions = None
+
         for product in state.order_depths.keys():
             orders: list[Order] = []
             logger.info(f"{product}")
@@ -614,11 +841,12 @@ class Trader:
             elif product == self.STARFRUIT_NAME:
                 orders = self.run_STARFRUIT(state)
             elif product == self.ORCHIDS_NAME:
-                pass
+                orders, conversions = self.run_ORCHIDS(state)
 
             result[product] = orders
 
         ##### STEP 3: ENCODE #####
+        logger.info("STEP 3: ENCODE")
 
         traderData = JSONEncoder().encode(
             {
@@ -628,16 +856,15 @@ class Trader:
                     self.starfruit_mid_price_predictors,
                 ),
                 self.ORCHIDS_NAME: (
-                    self.mid_price_predictors,
-                    self.transport_fees_predictors,
-                    self.export_tariff_predictors,
-                    self.import_tariff_predictors,
-                    self.sunlight_predictors,
-                    self.humidity_predictors,
+                    self.orchids_mid_price_predictors,
+                    self.orchids_transport_fees_predictors,
+                    self.orchids_export_tariff_predictors,
+                    self.orchids_import_tariff_predictors,
+                    self.orchids_sunlight_predictors,
+                    self.orchids_humidity_predictors,
                 ),
             }
         )
 
         # conversions is in round 2
-        conversions = None
         return result, conversions, traderData
