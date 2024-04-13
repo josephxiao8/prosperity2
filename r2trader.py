@@ -820,6 +820,7 @@ class Trader:
         traderData: str = state.traderData
         market_trades: dict[str, list[Trade]] = state.market_trades
         conversionObservations = state.observations.conversionObservations
+        timestamp = state.timestamp
         logger = Logger("run", Logger.DEBUG_LEVEL)
 
         ###### STEP 1: DECODE ######
@@ -854,6 +855,9 @@ class Trader:
         for product in state.order_depths.keys():
             orders: list[Order] = []
             logger.info(f"Position = {state.position.get(product, 0)} for {product}")
+            print(
+                f"72b8f0c1-bdb8-42d2-81c6-ca32bbb0a6b0,{timestamp},{product},{state.position.get(product, 0)}"
+            )
             logger.info(
                 f"{product} market trades:  {state.market_trades.get(product, [])}"
             )
