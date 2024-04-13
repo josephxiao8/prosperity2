@@ -458,16 +458,16 @@ class Trader:
             )
 
         acceptable_conversion_bid_price = (
-            acceptable_price
-            + conversionObservation.exportTariff
-            + conversionObservation.transportFees
+            conversionObservation.bidPrice
+            - conversionObservation.exportTariff
+            - conversionObservation.transportFees
+            - UNIT_ORCHID_STORAGE_COST
         )
 
         acceptable_conversion_ask_price = (
-            acceptable_price
+            conversionObservation.askPrice
             + conversionObservation.importTariff
             + conversionObservation.transportFees
-            + UNIT_ORCHID_STORAGE_COST
         )
 
         logger.info(
@@ -494,20 +494,14 @@ class Trader:
         logger.info("Generating ORCHIDS conversions if possible")
         if conversionObservation != None and position != 0:
             logger.info(f"Position is non-zero. Analyzing conversion observation.")
-            if (
-                position > 0
-                and acceptable_conversion_bid_price <= conversionObservation.bidPrice
-            ):
+            if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
                 # We will sell to the agent
                 logger.info(
                     f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
                 )
                 conversions = -1 * abs(position)
 
-            elif (
-                position < 0
-                and acceptable_conversion_ask_price > conversionObservation.askPrice
-            ):
+            elif position < 0 and acceptable_conversion_ask_price < acceptable_price:
                 # We will buy from the agent
                 logger.info(
                     f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
@@ -521,12 +515,12 @@ class Trader:
         agent_sell_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.sell_orders.items()
-            if price < acceptable_price + UNIT_ORCHID_STORAGE_COST
+            if price < acceptable_conversion_ask_price
         ]
         agent_buy_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.buy_orders.items()
-            if price >= acceptable_price
+            if price >= acceptable_conversion_bid_price
         ]
 
         agent_sell_orders_we_considering_quantity = sum(
