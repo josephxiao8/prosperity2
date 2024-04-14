@@ -173,7 +173,7 @@ class Trader:
                 # Don't go over the limit
                 order_vol = min(abs(bid_vol), position - position_min)
                 assert order_vol > 0
-                orders.append(Order(product, ask_price, -order_vol))
+                orders.append(Order(product, bid_price, -order_vol))
                 position -= order_vol
 
         if position > position_min and original_position > 0:
@@ -907,11 +907,9 @@ class Trader:
             )
 
             if product == self.AMETHYSTS_NAME:
-                pass
-                # orders = self.run_AMETHYSTS(state)
+                orders = self.run_AMETHYSTS(state)
             elif product == self.STARFRUIT_NAME:
-                pass
-                # orders = self.run_STARFRUIT(state)
+                orders = self.run_STARFRUIT(state)
             elif product == self.ORCHIDS_NAME:
                 orders, conversions = self.run_ORCHIDS(state)
 
