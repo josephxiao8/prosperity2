@@ -60,7 +60,7 @@ class Trader:
     POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20, "ORCHIDS": 100}
 
     ### BEGIN STARFRUIT STATE VAR ###
-    P_STARFRUIT = 4  # number of market_price and mid_price predictors (2P in total)
+    P_STARFRUIT = 8  # number of market_price and mid_price predictors (2P in total)
     starfruit_match_price_predictors: list[float]
     # elements of the form (price, quantity, timestamp)
     # stores data that will be aggregated to a single value, and pushed info starfruit_predictors
@@ -275,15 +275,23 @@ class Trader:
 
         beta = np.array(
             [
-                26.44753348300128,
-                0.03073808,
-                0.02727196,
-                0.02748499,
-                -0.02022061,
-                0.15585123,
-                0.19657682,
-                0.2511217,
-                0.32589726,
+                8.964154125777895,
+                0.00401325,
+                -0.01097109,
+                0.00503411,
+                0.00219081,
+                0.01628759,
+                0.00836369,
+                -0.00575337,
+                -0.01325094,
+                0.02501386,
+                0.03937632,
+                0.0703923,
+                0.09963095,
+                0.09229896,
+                0.16020264,
+                0.21157717,
+                0.29381952,
             ]
         )
 
