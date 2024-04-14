@@ -46,7 +46,10 @@ input.close()
 with open(f"target/{os.path.basename(path_to_log)}", "r") as input:
     os.makedirs("target/csv", exist_ok=True)  # make directory if it does not exist
 
-    output_position_csv = open(f"target/csv/{os.path.basename(path_to_log)}", "w+")
+    output_position_csv = open(
+        f"target/csv/{os.path.basename(path_to_log).removesuffix('.log') + '.csv'}",
+        "w+",
+    )
 
     timestamp = 0
 

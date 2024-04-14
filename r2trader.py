@@ -70,7 +70,7 @@ class Trader:
     ### END STARFRUIT STATE VAR ###
 
     ### BEGIN ORCHIDS STATE VAR ###
-    P_ORCHIDS = 4
+    P_ORCHIDS = 1
     orchids_mid_price_predictors: list[float]
     orchids_transport_fees_predictors: list[float]
     orchids_export_tariff_predictors: list[float]
@@ -495,6 +495,9 @@ class Trader:
             logger.warn("conversionObservation is none")
             return [], 0
 
+        logger.info(f"Conversion bid price {conversionObservation.bidPrice}")
+        logger.info(f"Conversion ask price {conversionObservation.askPrice}")
+
         acceptable_conversion_bid_price = (
             conversionObservation.bidPrice
             - conversionObservation.exportTariff
@@ -549,19 +552,23 @@ class Trader:
                 logger.info(f"Position is non-zero. Analyzing conversion observation.")
                 if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
                     # We will sell to the agent
+                    convert_amount = abs(position)
                     logger.info(
-                        f"Conversion: Selling {abs(position)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
+                        f"Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
                     )
-                    conversions = -1 * abs(position)
+                    conversions = -1 * abs(convert_amount)
+                    position -= convert_amount
 
                 elif (
                     position < 0 and acceptable_conversion_ask_price < acceptable_price
                 ):
+                    convert_amount = abs(position)
                     # We will buy from the agent
                     logger.info(
-                        f"Conversion: Buying {abs(position)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                        f"Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
                     )
-                    conversions = abs(position)
+                    conversions = abs(convert_amount)
+                    position += convert_amount
 
             # END conversion logic
 
@@ -572,12 +579,12 @@ class Trader:
         agent_sell_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.sell_orders.items()
-            if price < acceptable_conversion_ask_price
+            if price < int(acceptable_conversion_ask_price)
         ]
         agent_buy_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.buy_orders.items()
-            if price >= acceptable_conversion_bid_price
+            if price >= int(acceptable_conversion_bid_price)
         ]
 
         agent_sell_orders_we_considering_quantity = sum(
@@ -585,17 +592,9 @@ class Trader:
         )
         agent_buy_orders_we_considering_quantity = sum(agent_buy_orders_we_considering)
 
-        # TODO this assertion might not hold anymore
-        # one of these values must be zero
-        # assert (
-        #     agent_sell_orders_we_considering_quantity == 0
-        #     or agent_buy_orders_we_considering_quantity == 0
-        # )
-
         position_max = self.POSITION_LIMIT[product]
         position_min = -1 * self.POSITION_LIMIT[product]
 
-        # don't buy more than your position limits
         our_sell_quantity = min(
             agent_buy_orders_we_considering_quantity, abs(position - position_min)
         )
@@ -608,21 +607,23 @@ class Trader:
         assert position_min <= position_low <= position_high <= position_max
 
         orders: list[Order] = []
+
         if our_sell_quantity != 0:
+            # sell order
             orders.append(
-                # sell order
                 Order(
                     product,
                     int(acceptable_conversion_ask_price + 1),
                     -our_sell_quantity,
                 )
             )
+
         if our_buy_quantity != 0:
+            # buy order
             orders.append(
-                # buy order
                 Order(
                     product,
-                    int(acceptable_conversion_bid_price - 1),
+                    int(acceptable_price - 1),
                     our_buy_quantity,
                 )
             )
@@ -632,29 +633,29 @@ class Trader:
         # how much more we can still buy in current order
         quantity_we_can_still_buy = abs(position_high - position_max)
 
-        # LEFTOVER_QUANTITY_THRESHOLD = 0
+        LEFTOVER_QUANTITY_THRESHOLD = 40
 
-        # # Handle the leftovers after adjusting for being too near position limit
+        # Handle the leftovers after adjusting for being too near position limit
 
-        # quantity = how_much_to_order(
-        #     quantity_we_can_still_buy, LEFTOVER_QUANTITY_THRESHOLD
-        # )
+        quantity = how_much_to_order(
+            quantity_we_can_still_buy, LEFTOVER_QUANTITY_THRESHOLD
+        )
 
-        # if quantity > 0:
-        #     orders.append(
-        #         # buy order
-        #         Order(product, acceptable_price - 2, quantity)
-        #     )
+        if quantity > 0:
+            orders.append(
+                # buy order
+                Order(product, int(acceptable_conversion_bid_price - 2), quantity)
+            )
 
-        # quantity = how_much_to_order(
-        #     quantity_we_can_still_sell, LEFTOVER_QUANTITY_THRESHOLD
-        # )
+        quantity = how_much_to_order(
+            quantity_we_can_still_sell, LEFTOVER_QUANTITY_THRESHOLD
+        )
 
-        # if quantity > 0:
-        #     orders.append(
-        #         # sell order
-        #         Order(product, acceptable_price + 2, -quantity)
-        #     )
+        if quantity > 0:
+            orders.append(
+                # sell order
+                Order(product, int(acceptable_conversion_ask_price + 2), -quantity)
+            )
 
         logger.info(f"Orders: {orders}")
         logger.info(f"Conversion: {conversions}")
@@ -771,6 +772,7 @@ class Trader:
         self,
         decoded_orchids: Optional[
             tuple[
+                list[float],
                 list[float],
                 list[float],
                 list[float],
