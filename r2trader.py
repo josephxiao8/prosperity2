@@ -1,3 +1,4 @@
+from collections import OrderedDict
 from json import JSONDecoder, JSONEncoder
 
 from datamodel import ConversionObservation, OrderDepth, Trade, TradingState, Order
@@ -88,94 +89,127 @@ class Trader:
         orders: list[Order] = []
 
         acceptable_price = 10_000
-
         logger.info(f"Acceptable price: {str(acceptable_price)}")
 
-        best_sell = 0
-        sell_quantity = 0
-        best_buy = 0
-        buy_quantity = 0
-
-        # Order depth list come already sorted.
-        # We can simply pick first item to check first item to get best bid or offer
-        if len(order_depth.sell_orders) != 0:
-            best_sell = min(order_depth.sell_orders.keys())
-
-            filtered_sell_orders = [
-                sell_order
-                for sell_order in order_depth.sell_orders.items()
-                if sell_order[0] < acceptable_price
-            ]
-
-            filtered_quantities = [
-                abs(quantity) for _, quantity in filtered_sell_orders
-            ]
-
-            sell_quantity = sum(filtered_quantities)
-
-        if len(order_depth.buy_orders) != 0:
-            best_buy = max(order_depth.buy_orders.keys())
-
-            filtered_buy_orders = [
-                buy_order
-                for buy_order in order_depth.buy_orders.items()
-                if buy_order[0] > acceptable_price
-            ]
-
-            filtered_quantities = [abs(quantity) for _, quantity in filtered_buy_orders]
-            buy_quantity = sum(filtered_quantities)
-
-        position_current = state.position.get(product, 0)
-
-        logger.debug(f"Current position = {position_current} for product = {product}")
-
+        position = state.position.get(product, 0)
+        original_position = state.position.get(product, 0)
         position_max = self.POSITION_LIMIT[product]
         position_min = -position_max
 
-        buy_quantity = min(buy_quantity, abs(position_current - position_min))
-        sell_quantity = min(sell_quantity, abs(position_current - position_max))
-        intersect_quantity = min(buy_quantity, sell_quantity)
-
-        buy_quantity -= intersect_quantity
-        sell_quantity -= intersect_quantity
-
-        if buy_quantity != 0:
-            if abs(position_min - position_current) < 5:
-                # near short limit
-                buy_quantity = 0
-        elif sell_quantity != 0:
-            if abs(position_max - position_current) < 5:
-                # near long limit
-                sell_quantity = 0
-
-        assert position_min <= position_current - intersect_quantity - buy_quantity
-        assert position_max >= position_current + intersect_quantity + sell_quantity
-
-        orders.append(Order(product, best_buy, -intersect_quantity - buy_quantity))
-        orders.append(Order(product, best_sell, intersect_quantity + sell_quantity))
-
-        position_min_diff = abs(
-            position_current - intersect_quantity - buy_quantity - position_min
-        )
-        position_max_diff = abs(
-            position_current + intersect_quantity + sell_quantity - position_max
+        agent_sell_orders = OrderedDict(sorted(order_depth.sell_orders.items()))
+        agent_buy_orders = OrderedDict(
+            sorted(order_depth.buy_orders.items(), reverse=True)
         )
 
-        # orders above what the bots usually offer
-        orders.append(Order(product, int(1e4) + 4, -position_min_diff))
-        orders.append(Order(product, int(1e4) - 4, position_max_diff))
+        best_sell_price = (
+            -int(1e7)
+            if len(agent_sell_orders) == 0
+            else list(agent_sell_orders.items())[0][0]
+        )
+        best_buy_price = (
+            int(1e7)
+            if len(agent_buy_orders) == 0
+            else list(agent_buy_orders.items())[0][0]
+        )
 
-        assert (
-            position_min
-            <= position_current - intersect_quantity - buy_quantity - position_min_diff
-        )
-        assert (
-            position_max
-            >= position_current + intersect_quantity + sell_quantity + position_max_diff
-        )
+        # Considering the offers available to us (and knowing they didn't match),
+        # lets try to set offers that are more enticing than the ones offered to us
+        generous_buy_price = best_buy_price + 1
+        generous_sell_price = best_sell_price - 1
+
+        ### OUR BUY ORDERS ###
+        for ask_price, ask_vol in agent_sell_orders.items():
+            # we are looking to increase our position (i.e. we are buying more)
+            if position < position_max and (
+                ask_price < acceptable_price
+                or (ask_price == acceptable_price and position < 0)
+            ):
+                # Don't go over the limit
+                order_vol = min(abs(ask_vol), position_max - position)
+                assert order_vol > 0
+                orders.append(Order(product, ask_price, order_vol))
+                position += order_vol
+
+        if position < position_max and original_position < 0:
+            # We want to make sure that we get out of a negative position and into a positive now
+            # Be a bit more generous here
+            order_vol = position_max - position
+            assert order_vol > 0
+            orders.append(
+                Order(
+                    product,
+                    min(generous_buy_price + 1, acceptable_price - 1),
+                    order_vol,
+                )
+            )
+            position += order_vol
+
+        if position < position_max and original_position > 15:
+            # Don't be too generous and offer out best possible deal, we were already near the long position
+            order_vol = position_max - position
+            assert order_vol > 0
+            orders.append(
+                Order(product, min(best_buy_price, acceptable_price - 1), order_vol)
+            )
+            position += order_vol
+
+        if position < position_max:
+            order_vol = position_max - position
+            assert order_vol > 0
+            orders.append(
+                Order(product, min(generous_buy_price, acceptable_price - 1), order_vol)
+            )
+            position += order_vol
+
+        ### OUR SELL ORDERS ###
+        position = original_position  # reset position limit
+
+        for bid_price, bid_vol in agent_buy_orders.items():
+            # we are looking to decrease our position (i.e. we are selling our inventory)
+            if position > position_min and (
+                bid_price > acceptable_price
+                or (bid_price == acceptable_price and position > 0)
+            ):
+                # Don't go over the limit
+                order_vol = min(abs(bid_vol), position - position_min)
+                assert order_vol > 0
+                orders.append(Order(product, ask_price, -order_vol))
+                position -= order_vol
+
+        if position > position_min and original_position > 0:
+            # We want to make sure that we get out of a positive position and into a negative now
+            # Be a bit more generous here
+            order_vol = position - position_min
+            assert order_vol > 0
+            orders.append(
+                Order(
+                    product,
+                    max(generous_sell_price - 1, acceptable_price + 1),
+                    -order_vol,
+                )
+            )
+            position -= order_vol
+
+        if position > position_min and original_position < -15:
+            # Don't be too generous and offer out best possible deal, we were already near the short position
+            order_vol = position - position_min
+            assert order_vol > 0
+            orders.append(
+                Order(product, max(best_sell_price, acceptable_price + 1), -order_vol)
+            )
+            position -= order_vol
+
+        if position > position_min:
+            order_vol = position - position_min
+            assert order_vol > 0
+            orders.append(
+                Order(
+                    product, max(generous_sell_price, acceptable_price + 1), -order_vol
+                )
+            )
+            position -= order_vol
 
         logger.debug(f"Orders: {orders}")
-
         return orders
 
     def run_STARFRUIT(self, state: TradingState) -> list[Order]:
