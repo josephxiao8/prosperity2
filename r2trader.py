@@ -95,7 +95,6 @@ class Trader:
         original_position = state.position.get(product, 0)
         position_max = self.POSITION_LIMIT[product]
         position_min = -position_max
-        logger.debug(f"Current position = {position} for product = {product}")
 
         agent_sell_orders = OrderedDict(sorted(order_depth.sell_orders.items()))
         agent_buy_orders = OrderedDict(
@@ -166,7 +165,7 @@ class Trader:
         position = original_position  # reset position limit
 
         for bid_price, bid_vol in agent_buy_orders.items():
-            # we are looking to increase our position (i.e. we are buying more)
+            # we are looking to decrease our position (i.e. we are selling our inventory)
             if position > position_min and (
                 bid_price > acceptable_price
                 or (bid_price == acceptable_price and position > 0)
