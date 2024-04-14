@@ -489,6 +489,8 @@ class Trader:
         product = self.ORCHIDS_NAME
         orders: list[Order] = []
         conversions: int = 0
+        position_max = self.POSITION_LIMIT[product]
+        position_min = -1 * self.POSITION_LIMIT[product]
         UNIT_ORCHID_STORAGE_COST = 0.1
 
         if conversionObservation == None:
@@ -498,25 +500,21 @@ class Trader:
         logger.info(f"Conversion bid price {conversionObservation.bidPrice}")
         logger.info(f"Conversion ask price {conversionObservation.askPrice}")
 
-        acceptable_conversion_bid_price = (
+        south_bid_price_after_fees = (
             conversionObservation.bidPrice
             - conversionObservation.exportTariff
             - conversionObservation.transportFees
             - UNIT_ORCHID_STORAGE_COST
         )
 
-        acceptable_conversion_ask_price = (
+        south_ask_price_after_fees = (
             conversionObservation.askPrice
             + conversionObservation.importTariff
             + conversionObservation.transportFees
         )
 
-        logger.info(
-            f"Acceptable conversion agent bid price: {acceptable_conversion_bid_price}"
-        )
-        logger.info(
-            f"Acceptable conversion agent ask price: {acceptable_conversion_ask_price}"
-        )
+        logger.info(f"South bid price after fees: {south_bid_price_after_fees}")
+        logger.info(f"South ask price after fees: {south_ask_price_after_fees}")
 
         # Conversions
         logger.info("Generating ORCHIDS conversions (if possible)")
@@ -530,28 +528,14 @@ class Trader:
                 logger.warn(
                     f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
                 )
-
-            # TODO Investigate if can implement a fast conversion
-            if (
-                conversionObservation.importTariff + UNIT_ORCHID_STORAGE_COST
-                < conversionObservation.exportTariff
-            ):
-                logger.warn(
-                    "Opportunity to convert seashells to orchids and convert orchids to seashells in next timestamp"
-                )
-            else:
-                logger.warn(
-                    "Opportunity to convert orchids to seashells and convert to orchids next timestamp"
-                )
-
             # END Logging
 
             # BEGIN conversion logic
 
             if position != 0:
                 logger.info(f"Position is non-zero. Analyzing conversion observation.")
-                if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
-                    # We will sell to the agent
+                if position > 0 and south_bid_price_after_fees >= acceptable_price:
+                    # Decreasing our position
                     convert_amount = abs(position)
                     logger.info(
                         f"Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
@@ -559,16 +543,37 @@ class Trader:
                     conversions = -1 * abs(convert_amount)
                     position -= convert_amount
 
-                elif (
-                    position < 0 and acceptable_conversion_ask_price < acceptable_price
-                ):
+                elif position < 0 and south_ask_price_after_fees < acceptable_price:
                     convert_amount = abs(position)
-                    # We will buy from the agent
+                    # Increasing our position
                     logger.info(
-                        f"Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                        f"Case 1: Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
                     )
                     conversions = abs(convert_amount)
                     position += convert_amount
+                elif position < 0:
+                    agent_buy_orders = OrderedDict(
+                        sorted(order_depth.buy_orders.items(), reverse=True)
+                    )
+                    convert_amount = 0
+                    for bid_price, bid_vol in agent_buy_orders.items():
+                        # we are looking to decrease our position after increasing our position from this conversion
+                        if (
+                            bid_price > south_ask_price_after_fees
+                            and convert_amount < abs(position)
+                        ):
+                            # Don't go over the limit
+                            order_vol = min(
+                                abs(bid_vol), abs(position) - convert_amount
+                            )
+                            assert order_vol > 0
+                            orders.append(Order(product, bid_price, -order_vol))
+                            convert_amount += order_vol
+
+                    conversions = convert_amount
+                    logger.info(
+                        f"Case 2: Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                    )
 
             # END conversion logic
 
@@ -576,24 +581,35 @@ class Trader:
 
         # keep all values denoting volume/quantity non-negative, until we place actually place orders
 
+        best_sell_price = (
+            -int(1e8)
+            if len(order_depth.sell_orders) == 0
+            else min(order_depth.sell_orders.keys())
+        )
+        best_buy_price = (
+            int(1e8)
+            if len(order_depth.buy_orders) == 0
+            else min(order_depth.buy_orders.keys())
+        )
+        logger.debug(
+            f"best_sell_price: {best_sell_price}, best_buy_price: {best_buy_price}"
+        )
+
         agent_sell_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.sell_orders.items()
-            if price < int(acceptable_conversion_ask_price)
+            if price < int(south_bid_price_after_fees)
         ]
         agent_buy_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.buy_orders.items()
-            if price >= int(acceptable_conversion_bid_price)
+            if price > int(south_ask_price_after_fees)
         ]
 
         agent_sell_orders_we_considering_quantity = sum(
             agent_sell_orders_we_considering
         )
         agent_buy_orders_we_considering_quantity = sum(agent_buy_orders_we_considering)
-
-        position_max = self.POSITION_LIMIT[product]
-        position_min = -1 * self.POSITION_LIMIT[product]
 
         our_sell_quantity = min(
             agent_buy_orders_we_considering_quantity, abs(position - position_min)
@@ -613,7 +629,7 @@ class Trader:
             orders.append(
                 Order(
                     product,
-                    int(acceptable_conversion_ask_price + 1),
+                    int(south_ask_price_after_fees + 1),
                     -our_sell_quantity,
                 )
             )
@@ -623,7 +639,7 @@ class Trader:
             orders.append(
                 Order(
                     product,
-                    int(acceptable_price - 1),
+                    int(south_bid_price_after_fees - 1),
                     our_buy_quantity,
                 )
             )
@@ -644,7 +660,11 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # buy order
-                Order(product, int(acceptable_conversion_bid_price - 2), quantity)
+                Order(
+                    product,
+                    max(best_buy_price, int(south_bid_price_after_fees) - 2),
+                    quantity,
+                )
             )
 
         quantity = how_much_to_order(
@@ -654,7 +674,11 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # sell order
-                Order(product, int(acceptable_conversion_ask_price + 2), -quantity)
+                Order(
+                    product,
+                    min(best_sell_price, int(south_ask_price_after_fees) + 2),
+                    -quantity,
+                )
             )
 
         logger.info(f"Orders: {orders}")
