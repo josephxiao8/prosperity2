@@ -326,12 +326,12 @@ class Trader:
 
         x = np.array(
             [1.0]  # add 1.0 for intercept term
-            + self.orchids_mid_price_predictors[-1:]
-            + self.orchids_transport_fees_predictors[-1:]
-            + self.orchids_export_tariff_predictors[-1:]
-            + self.orchids_import_tariff_predictors[-1:]
-            + self.orchids_sunlight_predictors[-1:]
-            + self.orchids_humidity_predictors[-1:]
+            + self.orchids_mid_price_predictors
+            + self.orchids_transport_fees_predictors
+            + self.orchids_export_tariff_predictors
+            + self.orchids_import_tariff_predictors
+            + self.orchids_sunlight_predictors
+            + self.orchids_humidity_predictors
         )
 
         return max(0, int(np.dot(beta, x)))
