@@ -77,6 +77,8 @@ class Trader:
     orchids_import_tariff_predictors: list[float]
     orchids_sunlight_predictors: list[float]
     orchids_humidity_predictors: list[float]
+    orchids_iterations_with_long_position: int
+    orchids_iterations_with_short_position: int
     ### END ORCHIDS STATE VAR ###
 
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
@@ -489,6 +491,8 @@ class Trader:
         product = self.ORCHIDS_NAME
         orders: list[Order] = []
         conversions: int = 0
+        position_max = self.POSITION_LIMIT[product]
+        position_min = -1 * self.POSITION_LIMIT[product]
         UNIT_ORCHID_STORAGE_COST = 0.1
 
         if conversionObservation == None:
@@ -498,25 +502,21 @@ class Trader:
         logger.info(f"Conversion bid price {conversionObservation.bidPrice}")
         logger.info(f"Conversion ask price {conversionObservation.askPrice}")
 
-        acceptable_conversion_bid_price = (
+        south_bid_price_after_fees = (
             conversionObservation.bidPrice
             - conversionObservation.exportTariff
             - conversionObservation.transportFees
             - UNIT_ORCHID_STORAGE_COST
         )
 
-        acceptable_conversion_ask_price = (
+        south_ask_price_after_fees = (
             conversionObservation.askPrice
             + conversionObservation.importTariff
             + conversionObservation.transportFees
         )
 
-        logger.info(
-            f"Acceptable conversion agent bid price: {acceptable_conversion_bid_price}"
-        )
-        logger.info(
-            f"Acceptable conversion agent ask price: {acceptable_conversion_ask_price}"
-        )
+        logger.info(f"South bid price after fees: {south_bid_price_after_fees}")
+        logger.info(f"South ask price after fees: {south_ask_price_after_fees}")
 
         # Conversions
         logger.info("Generating ORCHIDS conversions (if possible)")
@@ -530,45 +530,63 @@ class Trader:
                 logger.warn(
                     f"Import tariff = {conversionObservation.importTariff} is GREATER than export tariff = {conversionObservation.exportTariff} (in absolute value)"
                 )
-
-            # TODO Investigate if can implement a fast conversion
-            if (
-                conversionObservation.importTariff + UNIT_ORCHID_STORAGE_COST
-                < conversionObservation.exportTariff
-            ):
-                logger.warn(
-                    "Opportunity to convert seashells to orchids and convert orchids to seashells in next timestamp"
-                )
-            else:
-                logger.warn(
-                    "Opportunity to convert orchids to seashells and convert to orchids next timestamp"
-                )
-
             # END Logging
 
             # BEGIN conversion logic
+            LONG_POSITION_ITERATIONS_BEFORE_FORCE_CONVERSION = 15
+            SHORT_POSITION_ITERATIONS_BEFORE_FORCE_CONVERSION = 20
+
+            FORCE_CONVERSION_FROM_LONG: bool = (
+                self.orchids_iterations_with_long_position
+                >= LONG_POSITION_ITERATIONS_BEFORE_FORCE_CONVERSION
+            )
+            FORCE_CONVERSION_FROM_SHORT: bool = (
+                self.orchids_iterations_with_short_position
+                >= SHORT_POSITION_ITERATIONS_BEFORE_FORCE_CONVERSION
+            )
 
             if position != 0:
                 logger.info(f"Position is non-zero. Analyzing conversion observation.")
-                if position > 0 and acceptable_conversion_bid_price >= acceptable_price:
-                    # We will sell to the agent
+                if position > 0 and (
+                    south_bid_price_after_fees >= acceptable_price
+                    or FORCE_CONVERSION_FROM_LONG
+                ):
+                    # Decreasing our position
                     convert_amount = abs(position)
                     logger.info(
-                        f"Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
+                        f"Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_LONG}"
                     )
                     conversions = -1 * abs(convert_amount)
                     position -= convert_amount
 
-                elif (
-                    position < 0 and acceptable_conversion_ask_price < acceptable_price
+                if position < 0 and (
+                    south_ask_price_after_fees < acceptable_price
+                    or FORCE_CONVERSION_FROM_SHORT
                 ):
                     convert_amount = abs(position)
-                    # We will buy from the agent
+                    # Increasing our position
                     logger.info(
-                        f"Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                        f"Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_SHORT}"
                     )
                     conversions = abs(convert_amount)
                     position += convert_amount
+
+            # We are assuming here that either conversion is zero or
+            # if non-zero it will take us back to position 0
+            if conversions != 0:
+                self.orchids_iterations_with_long_position = 0
+                self.orchids_iterations_with_short_position = 0
+            elif conversions == 0 and position != 0:
+                if position > 0:
+                    self.orchids_iterations_with_long_position += 1
+                    self.orchids_iterations_with_short_position = 0
+                else:
+                    self.orchids_iterations_with_long_position = 0
+                    self.orchids_iterations_with_short_position += 1
+            else:
+                # conversion == position == 0
+                self.orchids_iterations_with_long_position = 0
+                self.orchids_iterations_with_short_position = 0
 
             # END conversion logic
 
@@ -576,24 +594,35 @@ class Trader:
 
         # keep all values denoting volume/quantity non-negative, until we place actually place orders
 
+        best_sell_price = (
+            -int(1e8)
+            if len(order_depth.sell_orders) == 0
+            else min(order_depth.sell_orders.keys())
+        )
+        best_buy_price = (
+            int(1e8)
+            if len(order_depth.buy_orders) == 0
+            else min(order_depth.buy_orders.keys())
+        )
+        logger.debug(
+            f"best_sell_price: {best_sell_price}, best_buy_price: {best_buy_price}"
+        )
+
         agent_sell_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.sell_orders.items()
-            if price < int(acceptable_conversion_ask_price)
+            if price < int(south_bid_price_after_fees)
         ]
         agent_buy_orders_we_considering = [
             abs(vol)
             for price, vol in order_depth.buy_orders.items()
-            if price >= int(acceptable_conversion_bid_price)
+            if price > int(south_ask_price_after_fees)
         ]
 
         agent_sell_orders_we_considering_quantity = sum(
             agent_sell_orders_we_considering
         )
         agent_buy_orders_we_considering_quantity = sum(agent_buy_orders_we_considering)
-
-        position_max = self.POSITION_LIMIT[product]
-        position_min = -1 * self.POSITION_LIMIT[product]
 
         our_sell_quantity = min(
             agent_buy_orders_we_considering_quantity, abs(position - position_min)
@@ -613,7 +642,7 @@ class Trader:
             orders.append(
                 Order(
                     product,
-                    int(acceptable_conversion_ask_price + 1),
+                    int(south_ask_price_after_fees + 1),
                     -our_sell_quantity,
                 )
             )
@@ -623,7 +652,7 @@ class Trader:
             orders.append(
                 Order(
                     product,
-                    int(acceptable_price - 1),
+                    int(south_bid_price_after_fees - 1),
                     our_buy_quantity,
                 )
             )
@@ -633,7 +662,7 @@ class Trader:
         # how much more we can still buy in current order
         quantity_we_can_still_buy = abs(position_high - position_max)
 
-        LEFTOVER_QUANTITY_THRESHOLD = 40
+        LEFTOVER_QUANTITY_THRESHOLD = 0
 
         # Handle the leftovers after adjusting for being too near position limit
 
@@ -644,7 +673,11 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # buy order
-                Order(product, int(acceptable_conversion_bid_price - 2), quantity)
+                Order(
+                    product,
+                    max(best_buy_price, int(south_bid_price_after_fees) - 2),
+                    quantity,
+                )
             )
 
         quantity = how_much_to_order(
@@ -654,7 +687,11 @@ class Trader:
         if quantity > 0:
             orders.append(
                 # sell order
-                Order(product, int(acceptable_conversion_ask_price + 2), -quantity)
+                Order(
+                    product,
+                    min(best_sell_price, int(south_ask_price_after_fees) + 2),
+                    -quantity,
+                )
             )
 
         logger.info(f"Orders: {orders}")
@@ -778,7 +815,8 @@ class Trader:
                 list[float],
                 list[float],
                 list[float],
-                list[float],
+                int,
+                int,
             ]
         ],
         conversionObservation: Optional[ConversionObservation],
@@ -793,6 +831,8 @@ class Trader:
             self.orchids_import_tariff_predictors = []
             self.orchids_sunlight_predictors = []
             self.orchids_humidity_predictors = []
+            self.orchids_iterations_with_long_position = 0
+            self.orchids_iterations_with_short_position = 0
         else:
             self.orchids_mid_price_predictors = decoded_orchids[0]
             self.orchids_transport_fees_predictors = decoded_orchids[1]
@@ -800,6 +840,8 @@ class Trader:
             self.orchids_import_tariff_predictors = decoded_orchids[3]
             self.orchids_sunlight_predictors = decoded_orchids[4]
             self.orchids_humidity_predictors = decoded_orchids[5]
+            self.orchids_iterations_with_long_position = decoded_orchids[6]
+            self.orchids_iterations_with_short_position = decoded_orchids[7]
 
         # check assumptions
         expected_common_len = len(self.orchids_mid_price_predictors)
@@ -850,6 +892,12 @@ class Trader:
         )
         logger.debug(f"sunlight_predictors: {self.orchids_sunlight_predictors}")
         logger.debug(f"humidity_predictors: {self.orchids_humidity_predictors}")
+        logger.debug(
+            f"iterations_with_long_position: {self.orchids_iterations_with_long_position}"
+        )
+        logger.debug(
+            f"iterations_with_short_position: {self.orchids_iterations_with_short_position}"
+        )
 
     def run(self, state: TradingState):
 
@@ -858,7 +906,7 @@ class Trader:
         format: A dict whose keys are product names.
         {
             "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
-            "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors)
+            "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors, iterations_with_long_position, iterations_with_short_position)
         }
         """
         traderData: str = state.traderData
@@ -902,6 +950,7 @@ class Trader:
             print(
                 f"72b8f0c1-bdb8-42d2-81c6-ca32bbb0a6b0,{timestamp},{product},{state.position.get(product, 0)}"
             )
+            logger.info(f"{product} own trades:  {state.own_trades.get(product, [])}")
             logger.info(
                 f"{product} market trades:  {state.market_trades.get(product, [])}"
             )
@@ -932,6 +981,8 @@ class Trader:
                     self.orchids_import_tariff_predictors,
                     self.orchids_sunlight_predictors,
                     self.orchids_humidity_predictors,
+                    self.orchids_iterations_with_long_position,
+                    self.orchids_iterations_with_short_position,
                 ),
             }
         )
