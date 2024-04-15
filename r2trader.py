@@ -547,29 +547,81 @@ class Trader:
 
             if position != 0:
                 logger.info(f"Position is non-zero. Analyzing conversion observation.")
-                if position > 0 and (
-                    south_bid_price_after_fees >= acceptable_price
-                    or FORCE_CONVERSION_FROM_LONG
-                ):
-                    # Decreasing our position
-                    convert_amount = abs(position)
-                    logger.info(
-                        f"Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_LONG}"
+                if position > 0:
+                    agent_sell_orders = OrderedDict(
+                        sorted(order_depth.sell_orders.items())
                     )
-                    conversions = -1 * abs(convert_amount)
-                    position -= convert_amount
+                    convert_amount = 0
 
-                if position < 0 and (
-                    south_ask_price_after_fees < acceptable_price
-                    or FORCE_CONVERSION_FROM_SHORT
-                ):
-                    convert_amount = abs(position)
-                    # Increasing our position
-                    logger.info(
-                        f"Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_SHORT}"
+                    for ask_price, ask_vol in agent_sell_orders.items():
+                        # we are looking to increase our position after decreasing our position from this conversion
+                        if (
+                            ask_price < south_bid_price_after_fees
+                            and convert_amount < abs(position)
+                        ):
+                            # Don't go over the limit
+                            order_vol = min(
+                                abs(ask_vol), abs(position) - convert_amount
+                            )
+                            # orders.append(Order(product, ask_price, order_vol))
+                            convert_amount += order_vol
+
+                    if convert_amount > 0:
+                        conversions -= abs(convert_amount)
+                        logger.info(
+                            f"Joshua's Case -- Conversion: Selling {abs(convert_amount)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}"
+                        )
+
+                    if abs(conversions) < abs(position) and (
+                        south_bid_price_after_fees >= acceptable_price
+                        or FORCE_CONVERSION_FROM_LONG
+                    ):
+                        # Decreasing our position
+                        convert_amount_remaining = abs(position) - abs(conversions)
+                        logger.info(
+                            f"Conversion: Selling {abs(convert_amount_remaining)} orchid(s) @ agent's bid price of {conversionObservation.bidPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_LONG}"
+                        )
+                        conversions -= abs(convert_amount_remaining)
+
+                    position -= abs(conversions)
+
+                elif position < 0:
+                    agent_buy_orders = OrderedDict(
+                        sorted(order_depth.buy_orders.items(), reverse=True)
                     )
-                    conversions = abs(convert_amount)
-                    position += convert_amount
+                    convert_amount = 0
+
+                    for bid_price, bid_vol in agent_buy_orders.items():
+                        # we are looking to decrease our position after increasing our position from this conversion
+                        if (
+                            bid_price > south_ask_price_after_fees
+                            and convert_amount < abs(position)
+                        ):
+                            # Don't go over the limit
+                            order_vol = min(
+                                abs(bid_vol), abs(position) - convert_amount
+                            )
+                            # orders.append(Order(product, bid_price, -order_vol))
+                            convert_amount += order_vol
+
+                    if convert_amount > 0:
+                        conversions += convert_amount
+                        logger.info(
+                            f"Joshua's Case -- Conversion: Buying {abs(convert_amount)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}"
+                        )
+
+                    if abs(conversions) < abs(position) and (
+                        south_ask_price_after_fees < acceptable_price
+                        or FORCE_CONVERSION_FROM_SHORT
+                    ):
+                        convert_amount_remaining = abs(position) - abs(conversions)
+                        # Increasing our position
+                        logger.info(
+                            f"Conversion: Buying {abs(convert_amount_remaining)} orchid(s) @ agent's ask price of {conversionObservation.askPrice}; FORCE_CONVERSION: {FORCE_CONVERSION_FROM_SHORT}"
+                        )
+                        conversions += abs(convert_amount_remaining)
+
+                    position += abs(conversions)
 
             # We are assuming here that either conversion is zero or
             # if non-zero it will take us back to position 0
