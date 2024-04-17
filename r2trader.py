@@ -1295,45 +1295,43 @@ class Trader:
         logger.debug(f"Decoded: {decoded}")
 
         # dict indexing a key that does not exist throws error
-        with decoded.get(self.STARFRUIT_NAME, None) as decoded_starfruit:
-            self.decode_starfruit(
-                decoded_starfruit=decoded_starfruit,
-                starfruit_market_trades=market_trades.get(self.STARFRUIT_NAME, []),
-                starfruit_order_depths=state.order_depths.get(
-                    self.STARFRUIT_NAME, OrderDepth()
-                ),
-            )
+        decoded_starfruit = decoded.get(self.STARFRUIT_NAME, None)
+        self.decode_starfruit(
+            decoded_starfruit=decoded_starfruit,
+            starfruit_market_trades=market_trades.get(self.STARFRUIT_NAME, []),
+            starfruit_order_depths=state.order_depths.get(
+                self.STARFRUIT_NAME, OrderDepth()
+            ),
+        )
 
-        with decoded.get(self.ORCHIDS_NAME, None) as decoded_orchids:
-            self.decode_orchids(
-                decoded_orchids=decoded_orchids,
-                conversionObservation=conversionObservations.get(
-                    self.ORCHIDS_NAME, None
-                ),
-            )
+        decoded_orchids = decoded.get(self.ORCHIDS_NAME, None)
+        self.decode_orchids(
+            decoded_orchids=decoded_orchids,
+            conversionObservation=conversionObservations.get(self.ORCHIDS_NAME, None),
+        )
 
-        with decoded.get(self.CHOCOLATE_NAME, None) as decoded_chocolate:
-            self.decode_chocolate(
-                decoded_chocolate,
-                state.order_depths.get(self.CHOCOLATE_NAME, OrderDepth()),
-            )
+        decoded_chocolate = decoded.get(self.CHOCOLATE_NAME, None)
+        self.decode_chocolate(
+            decoded_chocolate,
+            state.order_depths.get(self.CHOCOLATE_NAME, OrderDepth()),
+        )
 
-        with decoded.get(self.STRAWBERRIES_NAME, None) as decoded_strawberries:
-            self.decode_strawberries(
-                decoded_strawberries,
-                state.order_depths.get(self.STRAWBERRIES_NAME, OrderDepth()),
-            )
+        decoded_strawberries = decoded.get(self.STRAWBERRIES_NAME, None)
+        self.decode_strawberries(
+            decoded_strawberries,
+            state.order_depths.get(self.STRAWBERRIES_NAME, OrderDepth()),
+        )
 
-        with decoded.get(self.ROSES_NAME, None) as decoded_roses:
-            self.decode_roses(
-                decoded_roses, state.order_depths.get(self.ROSES_NAME, OrderDepth())
-            )
+        decoded_roses = decoded.get(self.ROSES_NAME, None)
+        self.decode_roses(
+            decoded_roses, state.order_depths.get(self.ROSES_NAME, OrderDepth())
+        )
 
-        with decoded.get(self.GIFT_BASKET_NAME, None) as decoded_gift_basket:
-            self.decode_gift_basket(
-                decoded_gift_basket,
-                state.order_depths.get(self.GIFT_BASKET_NAME, OrderDepth()),
-            )
+        decoded_gift_basket = decoded.get(self.GIFT_BASKET_NAME, None)
+        self.decode_gift_basket(
+            decoded_gift_basket,
+            state.order_depths.get(self.GIFT_BASKET_NAME, OrderDepth()),
+        )
 
         ###### STEP 2: PLACE ORDERS #####
         logger.info("STEP 2: PLACE ORDERS")
