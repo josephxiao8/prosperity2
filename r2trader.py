@@ -37,7 +37,9 @@ def how_much_to_order(
     return max(pre_can_still_trade_quantity - post_can_still_trade_quantity, 0)
 
 
-def calculate_average(a: list[int], weights: Optional[list[int]] = None) -> float:
+def calculate_average(
+    a: list[int] | list[float], weights: Optional[list[int]] = None
+) -> float:
     if len(a) == 0:
         raise Exception("length of a must be non-zero")
 
@@ -56,8 +58,20 @@ class Trader:
     AMETHYSTS_NAME: str = "AMETHYSTS"
     STARFRUIT_NAME: str = "STARFRUIT"
     ORCHIDS_NAME: str = "ORCHIDS"
+    CHOCOLATE_NAME: str = "CHOCOLATE"
+    STRAWBERRIES_NAME: str = "STRAWBERRIES"
+    ROSES_NAME: str = "ROSES"
+    GIFT_BASKET_NAME: str = "GIFT_BASKET"
 
-    POSITION_LIMIT: dict[str, int] = {"AMETHYSTS": 20, "STARFRUIT": 20, "ORCHIDS": 100}
+    POSITION_LIMIT: dict[str, int] = {
+        AMETHYSTS_NAME: 20,
+        STARFRUIT_NAME: 20,
+        ORCHIDS_NAME: 100,
+        CHOCOLATE_NAME: 250,
+        STRAWBERRIES_NAME: 350,
+        ROSES_NAME: 60,
+        GIFT_BASKET_NAME: 60,
+    }
 
     ### BEGIN STARFRUIT STATE VAR ###
     P_STARFRUIT = 8  # number of market_price and mid_price predictors (2P in total)
@@ -81,6 +95,26 @@ class Trader:
     orchids_iterations_with_short_position: int
     ### END ORCHIDS STATE VAR ###
 
+    ### BEGIN CHOCOLATE STATE VAR ###
+    P_CHOCOLATE = 4
+    chocolate_mid_price_predictors: list[float]
+    ### END CHOCOLATE STATE VAR ###
+
+    ### BEGIN STRAWBERRIES STATE VAR ###
+    P_STRAWBERRIES = 4
+    strawberries_mid_price_predictors: list[float]
+    ### END STRAWBERRIES STATE VAR ###
+
+    ### BEGIN ROSES STAT VAR ###
+    P_ROSES = 4
+    roses_mid_price_predictors: list[float]
+    ### END ROSES STATE VAR ###
+
+    ### BEGIN GIFT_BASKET STATE VAR ###
+    P_GIFT_BASKET = 4
+    gift_basket_mid_price_predictors: list[float]
+    ### END GIFT_BASKET STATE VAR ###
+
     def run_AMETHYSTS(self, state: TradingState) -> list[Order]:
         logger = Logger("run_AMETHYSTS", Logger.INFO_LEVEL)
         logger.info("Beginning AMETHYSTS trading")
@@ -98,7 +132,7 @@ class Trader:
         position_max = self.POSITION_LIMIT[product]
         position_min = -position_max
 
-        agent_sell_orders = OrderedDict(sorted(order_depth.sell_orders.items()))
+        agent_sell_orders = OrderedDict(sorted(list(order_depth.sell_orders.items())))
         agent_buy_orders = OrderedDict(
             sorted(order_depth.buy_orders.items(), reverse=True)
         )
@@ -268,6 +302,47 @@ class Trader:
             conversionObservation=conversionObservation,
         )
 
+    def run_CHOCOLATE(self, state: TradingState) -> list[Order]:
+
+        if len(self.chocolate_mid_price_predictors) == 0:
+            return []
+
+        return self.get_CHOCOLATE_orders(
+            order_depth=state.order_depths.get(self.CHOCOLATE_NAME, OrderDepth()),
+            position=state.position.get(self.CHOCOLATE_NAME, 0),
+            acceptable_price=self.estimate_fair_price_chocolate(),
+        )
+
+    def run_STRAWBERRIES(self, state: TradingState) -> list[Order]:
+        if len(self.strawberries_mid_price_predictors) == 0:
+            return []
+
+        return self.get_STRAWBERRIES_orders(
+            order_depth=state.order_depths.get(self.STRAWBERRIES_NAME, OrderDepth()),
+            position=state.position.get(self.STRAWBERRIES_NAME, 0),
+            acceptable_price=self.estimate_fair_price_strawberries(),
+        )
+
+    def run_ROSES(self, state: TradingState) -> list[Order]:
+        if len(self.roses_mid_price_predictors) == 0:
+            return []
+
+        return self.get_ROSES_orders(
+            order_depth=state.order_depths.get(self.ROSES_NAME, OrderDepth()),
+            position=state.position.get(self.ROSES_NAME, 0),
+            acceptable_price=self.estimate_fair_price_roses(),
+        )
+
+    def run_GIFT_BASKET(self, state: TradingState) -> list[Order]:
+        if len(self.gift_basket_mid_price_predictors) == 0:
+            return []
+
+        return self.get_GIFT_BASKET_orders(
+            order_depth=state.order_depths.get(self.GIFT_BASKET_NAME, OrderDepth()),
+            position=state.position.get(self.GIFT_BASKET_NAME, 0),
+            acceptable_price=self.estimate_fair_price_gift_baskets(),
+        )
+
     def estimate_fair_price_starfruit(self) -> int:
         assert len(self.starfruit_match_price_predictors) == self.P_STARFRUIT
         assert len(self.starfruit_mid_price_predictors) == self.P_STARFRUIT
@@ -334,6 +409,84 @@ class Trader:
             + self.orchids_import_tariff_predictors
             + self.orchids_sunlight_predictors
             + self.orchids_humidity_predictors
+        )
+
+        return max(0, int(np.dot(beta, x)))
+
+    def estimate_fair_price_chocolate(self) -> int:
+        assert len(self.chocolate_mid_price_predictors) >= 1
+
+        if len(self.chocolate_mid_price_predictors) < self.P_CHOCOLATE:
+            return int(calculate_average(self.chocolate_mid_price_predictors))
+
+        assert len(self.chocolate_mid_price_predictors) == self.P_CHOCOLATE
+
+        beta = np.array(
+            [0.14240089710074244, -0.01108489, 0.00786715, 0.04070572, 0.96249293]
+        )
+
+        x = np.array(
+            [1.0] + self.chocolate_mid_price_predictors  # add 1.0 for intercept term
+        )
+
+        return max(0, int(np.dot(beta, x)))
+
+    def estimate_fair_price_strawberries(self) -> int:
+        assert len(self.strawberries_mid_price_predictors) >= 1
+
+        if len(self.strawberries_mid_price_predictors) < self.P_STRAWBERRIES:
+            return int(calculate_average(self.strawberries_mid_price_predictors))
+
+        assert len(self.strawberries_mid_price_predictors) == self.P_STRAWBERRIES
+
+        beta = np.array(
+            [0.37947875425743405, -0.00548191, 0.05122488, 0.1366758, 0.81748684]
+        )
+
+        x = np.array(
+            [1.0] + self.strawberries_mid_price_predictors  # add 1.0 for intercept term
+        )
+
+        return max(0, int(np.dot(beta, x)))
+
+    def estimate_fair_price_roses(self) -> int:
+        assert len(self.roses_mid_price_predictors) >= 1
+
+        if len(self.roses_mid_price_predictors) < self.P_ROSES:
+            return int(calculate_average(self.roses_mid_price_predictors))
+
+        assert len(self.roses_mid_price_predictors) == self.P_ROSES
+
+        beta = np.array(
+            [4.238897536935838, -0.00885487, 0.00141759, 0.01359939, 0.99354437]
+        )
+
+        x = np.array(
+            [1.0] + self.roses_mid_price_predictors  # add 1.0 for intercept term
+        )
+
+        return max(0, int(np.dot(beta, x)))
+
+    def estimate_fair_price_gift_baskets(self) -> int:
+        assert len(self.gift_basket_mid_price_predictors) >= 1
+
+        if len(self.gift_basket_mid_price_predictors) < self.P_GIFT_BASKET:
+            return int(calculate_average(self.gift_basket_mid_price_predictors))
+
+        assert len(self.gift_basket_mid_price_predictors) == self.P_GIFT_BASKET
+
+        beta = np.array(
+            [
+                3.180094202849432,
+                -5.15603870e-03,
+                -9.81008814e-04,
+                -1.12541938e-03,
+                1.00721665e00,
+            ]
+        )
+
+        x = np.array(
+            [1.0] + self.gift_basket_mid_price_predictors  # add 1.0 for intercept term
         )
 
         return max(0, int(np.dot(beta, x)))
@@ -487,6 +640,7 @@ class Trader:
         conversionObservation: Optional[ConversionObservation],
     ) -> tuple[list[Order], int]:
         logger = Logger("get_ORCHIDS_orders_and_conversions", Logger.DEBUG_LEVEL)
+        logger.info("Generating ORCHIDS orders and conversions")
 
         product = self.ORCHIDS_NAME
         orders: list[Order] = []
@@ -751,6 +905,48 @@ class Trader:
 
         return orders, conversions
 
+    def get_CHOCOLATE_orders(
+        self, order_depth: OrderDepth, position: int, acceptable_price: int
+    ) -> list[Order]:
+        logger = Logger("get_CHOCOLATE_orders", Logger.DEBUG_LEVEL)
+        logger.info("Generating CHOCOLATE orders")
+
+        orders: list[Order] = []
+
+        logger.info(f"Orders: {orders}")
+        return orders
+
+    def get_STRAWBERRIES_orders(
+        self, order_depth: OrderDepth, position: int, acceptable_price: int
+    ) -> list[Order]:
+        logger = Logger("get_STRAWBERRIES_orders", Logger.DEBUG_LEVEL)
+        logger.info("Generating STRAWBERRIES orders")
+
+        orders: list[Order] = []
+
+        logger.info(f"Orders: {orders}")
+        return orders
+
+    def get_ROSES_orders(
+        self, order_depth: OrderDepth, position: int, acceptable_price: int
+    ) -> list[Order]:
+        logger = Logger("get_ROSES_orders", Logger.DEBUG_LEVEL)
+        logger.info("Generating ROSES orders")
+
+        orders: list[Order] = []
+        logger.info(f"Orders: {orders}")
+        return orders
+
+    def get_GIFT_BASKET_orders(
+        self, order_depth: OrderDepth, position: int, acceptable_price: int
+    ) -> list[Order]:
+        logger = Logger("get_GIFT_BASKET_orders", Logger.DEBUG_LEVEL)
+        logger.info("Generating GIFT_BASKET orders")
+
+        orders: list[Order] = []
+        logger.info(f"Orders: {orders}")
+        return orders
+
     def decode_starfruit(
         self,
         decoded_starfruit: Optional[
@@ -951,6 +1147,126 @@ class Trader:
             f"iterations_with_short_position: {self.orchids_iterations_with_short_position}"
         )
 
+    def decode_chocolate(
+        self,
+        mid_price_predictors: Optional[list[float]],
+        chocolate_order_depth: OrderDepth,
+    ):
+        logger = Logger("decode_chocolate", Logger.DEBUG_LEVEL)
+        logger.info("Decoding CHOCOLATE")
+
+        if mid_price_predictors == None:
+            self.chocolate_mid_price_predictors = []
+        else:
+            self.chocolate_mid_price_predictors = mid_price_predictors
+
+        if (
+            len(chocolate_order_depth.buy_orders) != 0
+            and len(chocolate_order_depth.sell_orders) != 0
+        ):
+            mid_price = calculate_average(
+                list(chocolate_order_depth.buy_orders.keys())
+                + list(chocolate_order_depth.sell_orders.keys())
+            )
+
+            self.chocolate_mid_price_predictors.append(mid_price)
+
+        if len(self.chocolate_mid_price_predictors) > self.P_CHOCOLATE:
+            self.chocolate_mid_price_predictors.pop(0)
+
+        logger.debug(
+            f"chocolate_mid_price_predictors: {self.chocolate_mid_price_predictors}"
+        )
+
+    def decode_strawberries(
+        self,
+        mid_price_predictors: Optional[list[float]],
+        strawberries_order_depth: OrderDepth,
+    ):
+        logger = Logger("decode_strawberries", Logger.DEBUG_LEVEL)
+        logger.info("Decoding STRAWBERRIES")
+
+        if mid_price_predictors == None:
+            self.strawberries_mid_price_predictors = []
+        else:
+            self.strawberries_mid_price_predictors = mid_price_predictors
+
+        if (
+            len(strawberries_order_depth.buy_orders) != 0
+            and len(strawberries_order_depth.sell_orders) != 0
+        ):
+            mid_price = calculate_average(
+                list(strawberries_order_depth.buy_orders.keys())
+                + list(strawberries_order_depth.sell_orders.keys())
+            )
+
+            self.strawberries_mid_price_predictors.append(mid_price)
+
+        if len(self.strawberries_mid_price_predictors) > self.P_STRAWBERRIES:
+            self.strawberries_mid_price_predictors.pop(0)
+
+        logger.debug(
+            f"strawberries_mid_price_predictors: {self.strawberries_mid_price_predictors}"
+        )
+
+    def decode_roses(
+        self, mid_price_predictors: Optional[list[float]], roses_order_depth: OrderDepth
+    ):
+        logger = Logger("decode_roses", Logger.DEBUG_LEVEL)
+        logger.info("Decoding ROSES")
+
+        if mid_price_predictors == None:
+            self.roses_mid_price_predictors = []
+        else:
+            self.roses_mid_price_predictors = mid_price_predictors
+
+        if (
+            len(roses_order_depth.buy_orders) != 0
+            and len(roses_order_depth.sell_orders) != 0
+        ):
+            mid_price = calculate_average(
+                list(roses_order_depth.buy_orders.keys())
+                + list(roses_order_depth.sell_orders.keys())
+            )
+
+            self.roses_mid_price_predictors.append(mid_price)
+
+        if len(self.roses_mid_price_predictors) > self.P_ROSES:
+            self.roses_mid_price_predictors.pop(0)
+
+        logger.debug(f"roses_mid_price_predictors: {self.roses_mid_price_predictors}")
+
+    def decode_gift_basket(
+        self,
+        mid_price_predictors: Optional[list[float]],
+        gift_basket_order_depth: OrderDepth,
+    ):
+        logger = Logger("decode_gift_basket", Logger.DEBUG_LEVEL)
+        logger.info("Decoding GIFT_BASKET")
+
+        if mid_price_predictors == None:
+            self.gift_basket_mid_price_predictors = []
+        else:
+            self.gift_basket_mid_price_predictors = mid_price_predictors
+
+        if (
+            len(gift_basket_order_depth.buy_orders) != 0
+            and len(gift_basket_order_depth.sell_orders) != 0
+        ):
+            mid_price = calculate_average(
+                list(gift_basket_order_depth.buy_orders.keys())
+                + list(gift_basket_order_depth.sell_orders.keys())
+            )
+
+            self.gift_basket_mid_price_predictors.append(mid_price)
+
+        if len(self.gift_basket_mid_price_predictors) > self.P_GIFT_BASKET:
+            self.gift_basket_mid_price_predictors.pop(0)
+
+        logger.debug(
+            f"gift_basket_mid_price_predictors: {self.gift_basket_mid_price_predictors}"
+        )
+
     def run(self, state: TradingState):
 
         # ENCODE FORMAT:
@@ -959,6 +1275,10 @@ class Trader:
         {
             "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
             "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors, iterations_with_long_position, iterations_with_short_position)
+            "CHOCOLATE": mid_price_predictors
+            "STRAWBERRIES": mid_price_predictors
+            "ROSES": mid_price_predictors
+            "GIFT_BASKET": mid_price_predictors
         }
         """
         traderData: str = state.traderData
@@ -990,6 +1310,29 @@ class Trader:
             conversionObservation=conversionObservations.get(self.ORCHIDS_NAME, None),
         )
 
+        decoded_chocolate = decoded.get(self.CHOCOLATE_NAME, None)
+        self.decode_chocolate(
+            decoded_chocolate,
+            state.order_depths.get(self.CHOCOLATE_NAME, OrderDepth()),
+        )
+
+        decoded_strawberries = decoded.get(self.STRAWBERRIES_NAME, None)
+        self.decode_strawberries(
+            decoded_strawberries,
+            state.order_depths.get(self.STRAWBERRIES_NAME, OrderDepth()),
+        )
+
+        decoded_roses = decoded.get(self.ROSES_NAME, None)
+        self.decode_roses(
+            decoded_roses, state.order_depths.get(self.ROSES_NAME, OrderDepth())
+        )
+
+        decoded_gift_basket = decoded.get(self.GIFT_BASKET_NAME, None)
+        self.decode_gift_basket(
+            decoded_gift_basket,
+            state.order_depths.get(self.GIFT_BASKET_NAME, OrderDepth()),
+        )
+
         ###### STEP 2: PLACE ORDERS #####
         logger.info("STEP 2: PLACE ORDERS")
 
@@ -1013,6 +1356,14 @@ class Trader:
                 orders = self.run_STARFRUIT(state)
             elif product == self.ORCHIDS_NAME:
                 orders, conversions = self.run_ORCHIDS(state)
+            elif product == self.CHOCOLATE_NAME:
+                orders = self.run_CHOCOLATE(state)
+            elif product == self.STRAWBERRIES_NAME:
+                orders = self.run_STRAWBERRIES(state)
+            elif product == self.ROSES_NAME:
+                orders = self.run_ROSES(state)
+            elif product == self.GIFT_BASKET_NAME:
+                orders = self.run_GIFT_BASKET(state)
 
             result[product] = orders
 
@@ -1036,6 +1387,10 @@ class Trader:
                     self.orchids_iterations_with_long_position,
                     self.orchids_iterations_with_short_position,
                 ),
+                self.CHOCOLATE_NAME: self.chocolate_mid_price_predictors,
+                self.STRAWBERRIES_NAME: self.strawberries_mid_price_predictors,
+                self.ROSES_NAME: self.roses_mid_price_predictors,
+                self.GIFT_BASKET_NAME: self.gift_basket_mid_price_predictors,
             }
         )
 
