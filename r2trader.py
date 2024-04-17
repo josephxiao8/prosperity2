@@ -1258,7 +1258,7 @@ class Trader:
                 + list(gift_basket_order_depth.sell_orders.keys())
             )
 
-            self.roses_mid_price_predictors.append(mid_price)
+            self.gift_basket_mid_price_predictors.append(mid_price)
 
         if len(self.gift_basket_mid_price_predictors) > self.P_GIFT_BASKET:
             self.gift_basket_mid_price_predictors.pop(0)
