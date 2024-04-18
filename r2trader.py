@@ -55,12 +55,12 @@ def get_best_buy_and_sell_price(order_depth: OrderDepth) -> tuple[int, int]:
     best_buy_price = (
         int(1e7)
         if len(order_depth.buy_orders) == 0
-        else max(list(order_depth.buy_orders.keys()))
+        else max(order_depth.buy_orders.keys())
     )
     best_sell_price = (
         -int(-1e7)
         if len(order_depth.sell_orders) == 0
-        else min(list(order_depth.sell_orders.keys()))
+        else min(order_depth.sell_orders.keys())
     )
     return best_buy_price, best_sell_price
 
@@ -506,13 +506,11 @@ class Trader:
         ratio = gift_basket / combo
 
         logger.debug(
-            f"Past{self.GIFT_BASKET_ROLLING_RATIO_WINDOW} ratios: {ratio.tolist()}"
+            f"Past {self.GIFT_BASKET_ROLLING_RATIO_WINDOW} ratios: {ratio.tolist()}"
         )
 
         # TODO investigate if changing 5 to some other number gives better results
-        z_score: float = (
-            ratio[-5:].mean() - ratio[-self.GIFT_BASKET_ROLLING_RATIO_WINDOW :].mean()
-        ) / ratio[-self.GIFT_BASKET_ROLLING_RATIO_WINDOW :].std()
+        z_score: float = (ratio[-5:].mean() - ratio.mean()) / (ratio.std() + 1e-8)
 
         logger.info(f"z_score: {z_score}")
 
@@ -1358,8 +1356,9 @@ class Trader:
             self.gift_basket_mid_price_predictors = decoded_gift_basket[0]
             self.combo_mid_price_predictors = decoded_gift_basket[1]
 
-        best_buy_price = max(list(gift_basket_order_depth.buy_orders.keys()))
-        best_sell_price = max(list(gift_basket_order_depth.sell_orders.keys()))
+        best_buy_price, best_sell_price = get_best_buy_and_sell_price(
+            gift_basket_order_depth
+        )
         gift_basket_mid_price = (best_buy_price + best_sell_price) / 2
 
         # Add mid price
@@ -1397,19 +1396,6 @@ class Trader:
         logger.debug(f"combo_mid_price_predictors: {self.combo_mid_price_predictors}")
 
     def run(self, state: TradingState):
-
-        # ENCODE FORMAT:
-        """
-        format: A dict whose keys are product names.
-        {
-            "STARFRUIT": (match_price_predictors, recent_match_prices_queue, mid_price_predictors)
-            "ORCHIDS": (mid_price_predictors, transport_fees_predictors, export_tariff_predictors, import_tariff_predictors, sunlight_predictors, humidity_predictors, iterations_with_long_position, iterations_with_short_position)
-            "CHOCOLATE": mid_price_predictors
-            "STRAWBERRIES": mid_price_predictors
-            "ROSES": mid_price_predictors
-            "GIFT_BASKET": mid_price_predictors
-        }
-        """
         traderData: str = state.traderData
         market_trades: dict[str, list[Trade]] = state.market_trades
         conversionObservations = state.observations.conversionObservations
