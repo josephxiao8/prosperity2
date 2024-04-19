@@ -1,5 +1,4 @@
 from collections import OrderedDict
-from itertools import product
 from json import JSONDecoder, JSONEncoder
 
 from datamodel import ConversionObservation, OrderDepth, Trade, TradingState, Order
@@ -524,9 +523,6 @@ class Trader:
         NP_product_midprice = np.array(product_midprice)
         NP_combination_midprice = np.array(combination_midprice)
 
-        # TODO calculate combo
-        combo = 0
-        # TODO might have to reverse the ratio
         ratio = (
             NP_product_midprice / NP_combination_midprice
             if (NP_product_midprice[0] > NP_combination_midprice[0])
