@@ -1422,7 +1422,7 @@ class Trader:
             elif product == self.ORCHIDS_NAME:
                 orders, conversions = self.run_ORCHIDS(state)
             elif product == self.CHOCOLATE_NAME:
-                orders = self.run_CHOCOLATE(state)
+                pass
             elif product == self.STRAWBERRIES_NAME:
                 orders = self.run_STRAWBERRIES(state)
             elif product == self.ROSES_NAME:
